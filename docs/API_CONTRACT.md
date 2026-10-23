@@ -28,7 +28,7 @@
 - 建议 API 前缀：**/api/v1**
 - 请求与响应：JSON；文件导入使用 multipart/form-data
 - ID：不透明字符串，客户端不得依赖其内部格式
-- 金额：整数分，例如人民币 ¥12.34 表示为 1234
+- 金额：整数分，例如人民币 ¥12.34 表示为 1234。交易本身的 amount_minor 始终为正整数；账户影响与资金变动用正负号表示流入/流出。
 - 日期：YYYY-MM-DD
 - 日期时间：ISO 8601 / RFC 3339，必须携带时区偏移
 - 月份：YYYY-MM
@@ -165,11 +165,11 @@ GET /api/v1/overview?month=2026-10
     },
     "personal_spending": {
       "month_spent_minor": 320000,
-      "daily_average_minor": 10667,
-      "previous_month_daily_average_minor": 9500,
-      "daily_change_minor": 1167,
-      "daily_change_rate": 0.1228,
-      "projected_month_spending_minor": 330677
+      "daily_average_minor": 16000,
+      "previous_month_daily_average_minor": 15000,
+      "daily_change_minor": 1000,
+      "daily_change_rate": 0.0667,
+      "projected_month_spending_minor": 496000
     },
     "budget": {
       "budget_minor": 300000,
@@ -392,7 +392,7 @@ POST /api/v1/accounts/{accountId}/fund-adjustments
 - credit_repayment：信用还款，减少实际付款账户余额，但不计入消费统计
 - internal_transfer：内部转账，不计收入或消费
 
-语义必须与交易类型、账户影响相符；例如 credit_purchase 只允许与 expense 配合，internal_transfer 只允许与 transfer 配合。信用语义由受控业务处理产生，不得由前端随意传值来绕过资金规则。
+语义必须与交易类型、账户影响相符；例如 credit_purchase 只允许与 expense 配合，internal_transfer 只允许与 transfer 配合。客户端可以提交候选语义，但后端必须校验其与交易字段、账户和来源证据相符，不能仅凭客户端传值绕过资金规则。
 
 ### 6.2 创建交易
 
@@ -452,6 +452,8 @@ POST /api/v1/transactions
 5. 对 applied 影响，按统一规则生成 AccountFundMovement。
 6. 在同一原子操作中验证账户余额、资金份额、转账两端和退款关联约束。
 7. 返回正式保存结果与必要的存款使用提醒。
+
+退款还有两个需要在实现前明确的边界：退款到账账户可能不同于原消费账户；原消费也可能是没有现金账户扣减份额的 credit_purchase。现有冻结规则和逻辑模型尚未完整定义这两种组合的资金份额恢复方式。实现前必须补充对应规则，不得静默把退款当作普通收入，也不得擅自将资金变动记回错误账户。
 
 响应示例：
 
@@ -522,7 +524,7 @@ PATCH /api/v1/transactions/{transactionId}
 - 金额增加：按自己的流动资金 → 自己的存款 → 对象存款的顺序扣减。
 - 金额减少：按对象存款 → 自己的存款 → 自己的流动资金的顺序补足资金缺口。
 - 真实退款与金额修改的差额返还必须区分；前者按原交易扣款顺序逆序恢复。
-- 如果被编辑的本身是一笔退款，金额变更必须依据其原消费关联和已退款份额重新核算，不得套用普通支出的差额返还规则。
+- 如果被编辑的本身是一笔退款，金额变更必须先排除该退款原有的有效影响，再按修改后的退款金额、原消费关联和剩余可退款份额重新核算；不得套用普通支出的差额返还规则。
 - 如果新金额导致累计退款超过原消费金额，返回 409 REFUND_EXCEEDS_ORIGINAL，不允许保存半成品状态。
 - 如果修改类型会让已有退款关联到非消费交易，返回 409 INVALID_TRANSACTION_TYPE_CHANGE；不留下非法关联。
 - 如果改为转账，系统不得擅自把存款转换成流动资金。
@@ -793,7 +795,9 @@ POST /api/v1/relationship/binding
 2. 前端是否能仅依赖这些接口完成账户、账单、首页、预算、绑定与官方导入的核心操作。
 3. 交易创建/编辑/删除与资金变动的原子边界是否足够清楚。
 4. 导入匹配与人工处理接口是否符合“尽量自动、必要时处理、不建设复杂异常中心”的要求。
-5. POST /relationship/binding 的绑定凭据获取方式仍未确定；它是唯一明确标注的关系绑定实现前置项。
+5. POST /relationship/binding 的绑定凭据获取方式仍未确定，需在实现绑定功能前补充规则。
+6. 退款到账账户与原消费账户不同时，资金份额恢复应落在哪个账户；以及原消费为 credit_purchase、没有现金扣减份额时如何分配退款，均需补充业务规则后再实现相关组合。
+7. 修改账户记账起始日期时，若历史交易状态变化，如何安全重建该账户的有效资金变动，需要在物理模型和测试阶段落实原子重算边界。
 
 ### 后续顺序
 
