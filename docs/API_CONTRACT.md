@@ -522,6 +522,7 @@ PATCH /api/v1/transactions/{transactionId}
 - 金额增加：按自己的流动资金 → 自己的存款 → 对象存款的顺序扣减。
 - 金额减少：按对象存款 → 自己的存款 → 自己的流动资金的顺序补足资金缺口。
 - 真实退款与金额修改的差额返还必须区分；前者按原交易扣款顺序逆序恢复。
+- 如果被编辑的本身是一笔退款，金额变更必须依据其原消费关联和已退款份额重新核算，不得套用普通支出的差额返还规则。
 - 如果新金额导致累计退款超过原消费金额，返回 409 REFUND_EXCEEDS_ORIGINAL，不允许保存半成品状态。
 - 如果修改类型会让已有退款关联到非消费交易，返回 409 INVALID_TRANSACTION_TYPE_CHANGE；不留下非法关联。
 - 如果改为转账，系统不得擅自把存款转换成流动资金。
@@ -559,7 +560,7 @@ V1 只支持微信和支付宝官方账单文件；截图识别不属于此接�
   "data": {
     "batch_id": "import-batch-id",
     "platform": "wechat",
-    "status": "completed",
+    "status": "needs_review",
     "summary": {
       "transactions_created": 120,
       "transactions_linked": 8,
@@ -567,7 +568,9 @@ V1 只支持微信和支付宝官方账单文件；截图识别不属于此接�
       "needs_review": 1,
       "failed_rows": 0
     },
-    "review_items": []
+    "review_items": [
+      {"source_record_id": "source-record-id", "reason_code": "AMBIGUOUS_MATCH"}
+    ]
   }
 }
 ~~~
