@@ -152,6 +152,8 @@ class Ledger:
         require(len(proposed['accounts']) == len(t['accounts']) and len(set(proposed['accounts'])) == len(t['accounts']), 'VALIDATION_ERROR')
         if 'affects' in changes:
             require(t['type'] == 'refund' and type(changes['affects']) is bool, 'VALIDATION_ERROR')
+        if all(proposed[field] == t[field] for field in changes):
+            return  # Validated no-op: no new version or allocation.
         financial = 'amount' in changes or 'accounts' in changes
         before_active = {k for k in t['accounts'] if t['when'].date().isoformat() >= self.accounts[k]['opening']}
         after_active = {k for k in proposed['accounts'] if proposed['when'].date().isoformat() >= self.accounts[k]['opening']}
@@ -418,6 +420,56 @@ def eligible_manual(t, batch, result, profile, explicit_profile=None, wallet_pro
             batch['declared_from'] <= t['when'] <= batch['effective_to'])
 
 
+def reference_pilot_body(payload, patch=False, compare_version=None):
+    """Trial request validation only, not HTTP or a production capability switch.
+    Version behavior must be selected explicitly for a proposed PATCH scenario.
+    """
+    require(type(payload) is dict, 'VALIDATION_ERROR')
+    if patch:
+        require(type(compare_version) is bool, 'PILOT_DECISION_REQUIRED')
+        allowed={'version','occurred_at','affects_spending','amount_minor','account_id','category_code','merchant','note'}
+        required={'version'} if compare_version else set()
+        if not compare_version:
+            allowed.remove('version')
+    else:
+        require(payload.get('type') != 'refund', 'REFUND_REQUIRES_OFFICIAL_SOURCE')
+        allowed={'type','accounting_semantics','amount_minor','occurred_at','account_id','from_account_id','to_account_id','category_code','merchant','note','source_account_profile_id'}
+        required={'type','accounting_semantics','amount_minor','occurred_at'}
+    require(set(payload)<=allowed and required<=set(payload), 'VALIDATION_ERROR')
+    r=deepcopy(payload)
+    for field in ('amount_minor','version'):
+        if field in r:
+            require(type(r[field]) is int and r[field]>0, 'VALIDATION_ERROR')
+    for field in ('account_id','from_account_id','to_account_id','source_account_profile_id','category_code','merchant','note'):
+        if field in r:
+            require(type(r[field]) is str, 'VALIDATION_ERROR')
+            if field not in ('merchant','note'):
+                require(bool(r[field]), 'VALIDATION_ERROR')
+    if 'category_code' in r:
+        require(r['category_code'] in set(CATEGORIES.values())|{'other'},'VALIDATION_ERROR')
+    if 'affects_spending' in r:
+        require(type(r['affects_spending']) is bool,'VALIDATION_ERROR')
+    if 'occurred_at' in r:
+        require(type(r['occurred_at']) is str, 'VALIDATION_ERROR')
+        try:
+            stamp=datetime.fromisoformat(r['occurred_at'])
+        except ValueError:
+            raise RuleError('VALIDATION_ERROR')
+        require(stamp.tzinfo is not None and stamp<=NOW,'VALIDATION_ERROR')
+        r['occurred_at']=stamp.astimezone(TZ)
+    if not patch:
+        kind=r['type']
+        require(kind in ('income','expense','transfer'),'VALIDATION_ERROR')
+        require(r['accounting_semantics']==('internal_transfer' if kind=='transfer' else 'ordinary'),'VALIDATION_ERROR')
+        accounts={'from_account_id','to_account_id'} if kind=='transfer' else {'account_id'}
+        forbidden={'account_id'} if kind=='transfer' else {'from_account_id','to_account_id'}
+        require(accounts<=set(r) and not forbidden&set(r),'VALIDATION_ERROR')
+        if kind=='transfer':
+            require(r['from_account_id']!=r['to_account_id'],'VALIDATION_ERROR')
+        r.setdefault('category_code','other');r.setdefault('merchant','');r.setdefault('note','')
+    return r
+
+
 def validate(wechat, alipay):
     tests=[]
     def check(name, condition):
@@ -587,7 +639,7 @@ def validate(wechat, alipay):
         for d in re.findall(r'\]\(([^)]+)\)',p.read_text()) if ':' not in d and not d.startswith('#')))
     api=(root/'docs/API_CONTRACT.md').read_text()
     examples=[json.loads(s) for s in re.findall(r'```json\n(.*?)\n```',api,re.S)]
-    check('全部API示例JSON合法',len(examples)==3)
+    check('全部API示例JSON合法',bool(examples) and any(x.get('type')=='expense' for x in examples) and any('version' in x and 'affects_spending' in x for x in examples))
     for ex in examples:
         if 'occurred_at' in ex:
             check('API时间示例携带偏移:'+str(len(tests)),datetime.fromisoformat(ex['occurred_at']).tzinfo is not None)
@@ -618,6 +670,35 @@ def validate(wechat, alipay):
     snapshot=deepcopy(op.__dict__)
     rejects('不安全起始重建明确拒绝',lambda:op.opening_state('self','a','2026-01-01',[0,0,0]),'OPENING_STATE_RECALCULATION_CONFLICT')
     check('起始重建失败整体回滚',op.__dict__==snapshot)
+    manual_payload=next(x for x in examples if x.get('type')=='expense')
+    command=reference_pilot_body(manual_payload)
+    pilot=Ledger();pilot.account('account-a','self',[500000,0,0],opening='2026-10-01')
+    pt=pilot.create('self',command['type'],command['amount_minor'],command['occurred_at'],[command['account_id']])
+    check('创建试点示例准确扣款2580分',pilot.accounts['account-a']['shares'][0]==497420 and pilot.transactions[pt]['version']==1)
+    for value in (0,None,'2580',True):
+        bad=deepcopy(manual_payload);bad['amount_minor']=value
+        rejects('试点请求严格金额:'+str(value),lambda bad=bad:reference_pilot_body(bad),'VALIDATION_ERROR')
+    no_zone=deepcopy(manual_payload);no_zone['occurred_at']='2026-10-20T12:30:00'
+    rejects('公共请求不自动补缺失时区',lambda:reference_pilot_body(no_zone),'VALIDATION_ERROR')
+    extra=deepcopy(manual_payload);extra['user_id']='other'
+    rejects('创建请求拒绝未声明授权字段',lambda:reference_pilot_body(extra),'VALIDATION_ERROR')
+    bad_transfer=dict(type='transfer',accounting_semantics='internal_transfer',amount_minor=100,occurred_at=manual_payload['occurred_at'],from_account_id='account-a',to_account_id='account-a')
+    rejects('创建请求禁止同账户转账',lambda:reference_pilot_body(bad_transfer),'VALIDATION_ERROR')
+    pr=pilot.create('self','refund',44,aware('2026-09-27T12:08:36+08:00'),['account-a'],official=True,refund_kind='merchant_refund',affects=True)
+    snap=deepcopy(pilot.__dict__)
+    pilot.edit('self',pr,1)
+    check('退款空PATCH不产生版本或资金变化',pilot.__dict__==snap)
+    pilot.edit('self',pr,1,affects=True)
+    check('退款相同值PATCH不产生版本或资金变化',pilot.__dict__==snap)
+    pilot.edit('self',pr,1,affects=False)
+    rejects('空改动不绕过所选版本分支检查',lambda:pilot.edit('self',pr,1),'RESOURCE_VERSION_CONFLICT')
+    no_field=reference_pilot_body({'version':2},patch=True,compare_version=True)
+    false_field=reference_pilot_body({'version':2,'affects_spending':False},patch=True,compare_version=True)
+    check('PATCH省略与显式false分开', 'affects_spending' not in no_field and false_field['affects_spending'] is False)
+    rejects('PATCH null不能冒充省略',lambda:reference_pilot_body({'version':2,'affects_spending':None},patch=True,compare_version=True),'VALIDATION_ERROR')
+    rejects('PATCH源时间只读',lambda:reference_pilot_body({'version':2,'source_occurred_at':'2026-09-01T00:00:00+08:00'},patch=True,compare_version=True),'VALIDATION_ERROR')
+    errors=[x for x in examples if 'code' in x]
+    check('试点HTTP错误示例统一顶层code/message',bool(errors) and all(set(x)=={'code','message'} and type(x['code']) is str and type(x['message']) is str for x in errors))
     result_led.invariant()
     return tests,outputs
 
