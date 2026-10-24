@@ -557,8 +557,8 @@ POST /api/v1/imports
       "transactions_created": 120,
       "transactions_linked": 8,
       "duplicate_sources_ignored": 3,
-      "source_records_needing_review": 0,
-      "manual_transactions_not_found": 4,
+      "source_records_needing_review": 1,
+      "manual_transactions_not_found": 1,
       "reconciliation_items_rechecked": 2,
       "failed_rows": 0
     },
@@ -578,6 +578,7 @@ POST /api/v1/imports
     "review_items": [
       {"source_record_id": "source-record-id", "reason_code": "AMBIGUOUS_MATCH"}
     ],
+    "row_errors": [],
     "reconciliation_items": [
       {"reconciliation_item_id": "reconciliation-item-id", "transaction_id": "manual-transaction-id", "reason_code": "NO_SOURCE_MATCH_WITHIN_COVERAGE", "status": "pending_confirmation"}
     ]
@@ -587,11 +588,11 @@ POST /api/v1/imports
 
 状态建议：
 
-- completed：批次处理完成，没有待用户处理的来源记录或手动交易核对项。
-- needs_review：批次已处理，但存在待处理来源记录或待用户确认的手动交易核对项。
+- completed：本批次处理已完成，且本批次没有新产生的待处理来源项、核对项或行级错误。此前批次遗留的待处理核对项可以继续存在，不因此在每次重叠导入中重复弹出。
+- needs_review：本批次新产生待处理来源项、新核对项或行级错误，需要用户查看本次结果。
 - failed：文件无法安全解析或批次无法完成；不得报告为成功入账。
 
-`transactions_created`、`transactions_linked` 和 `duplicate_sources_ignored` 是互斥计数。`source_records_needing_review` 只统计非退款官方来源行的待处理项；`manual_transactions_not_found` 统计本批次新建的核对项；`reconciliation_items_rechecked` 统计本批次重新检查到的既有核对项，不会生成重复提示。`coverage.complete` 只有在导出类型为全量、起止时间可解析、声明记录数与实际解析行数一致且无解析失败时才能为 true；否则不得生成“未找到来源”的核对项。
+`transactions_created`、`transactions_linked` 和 `duplicate_sources_ignored` 是互斥计数。`source_records_needing_review` 只统计非退款官方来源行的待处理项；`manual_transactions_not_found` 统计本批次新建的核对项；`reconciliation_items_rechecked` 统计本批次重新检查到的既有核对项，不会生成重复提示。`coverage.complete` 只有在导出类型为全量、起止时间可解析、声明记录数与实际解析行数一致且所有明细行均能解析出必要的来源身份时才能为 true；否则不得生成“未找到来源”的核对项。平台交易状态为失败/关闭不等于解析失败，必须按官方状态规则处理，不应混入 parser error。
 
 ### 7.2 导入处理约束
 
@@ -601,7 +602,7 @@ POST /api/v1/imports
 2. 校验表头、日期范围、全量导出标记、声明行数和实际解析行数；不完整文件仍可报告解析结果，但不得执行缺失手动交易核对。
 3. 解析每行官方交易单号，按 `(source_account_profile_id, official_transaction_id)` 查找或创建 SourceRecord；商户订单号不作为唯一主键。
 4. 为每条已识别来源保存 SourceObservation。若重叠导出中同一交易的状态不同，保留两次观察，并按导出时间较新的观察更新当前来源状态；旧文件不得覆盖新状态。
-5. 按平台规则解析交易语义和唯一退款原消费；退款到账账户必须与原消费账户相同。若无法建立唯一退款关系，该行失败，不创建退款交易。
+5. 按平台规则解析交易语义和唯一退款原消费；退款到账账户必须与原消费账户相同。若无法建立唯一退款关系，该行加入 row_errors（reason_code=REFUND_ORIGINAL_NOT_RESOLVED），不创建退款交易。
 6. 匹配已有来源与手动交易；已存在来源不重复入账，匹配到已有手动交易时关联来源，不重复创建交易。
 7. 对新交易调用统一交易处理逻辑；不直接写余额。对起始日前交易保留事实但不改变该账户余额。
 8. 只有完整覆盖范围和来源账户档案/行级渠道映射都明确时，才核对范围内未匹配到官方来源的手动交易。
@@ -651,6 +652,7 @@ POST /api/v1/imports/{batchId}/resolutions
 ~~~
 
 - `link_existing_transaction` 只用于“该官方来源行本身就是这笔已有交易”的情况，必须验证交易属于当前用户，且没有与另一个不兼容的来源身份冲突。
+- `row_errors` 记录已识别官方行但无法安全处理的行号与 reason_code；例如 `REFUND_ORIGINAL_NOT_RESOLVED`。该错误只阻止该行创建账务，不把退款转成普通收入。
 - `create_transaction` 只用于可独立建立的普通收入、支出或转账来源，通过统一交易规则创建正式交易；不得绕过资金分配和账户起始日期规则。
 - 退款不走通用的人工 resolution；由平台专用解析器按官方规则唯一关联原消费并自动调用统一交易用例创建退款交易。若无法唯一关联，记录 `REFUND_ORIGINAL_NOT_RESOLVED` 导入错误并保留原始证据，不创建交易，也不把它作为用户日常选择原消费的待处理项。
 - 处理成功后更新 SourceRecord 关联与 ImportBatch 计数。
@@ -786,9 +788,7 @@ POST /api/v1/relationship/binding
 | 422 | INVALID_REFUND_LINK | 原交易不存在、不属于当前用户或不是有效原消费 |
 | 422 | REFUND_REQUIRES_OFFICIAL_SOURCE | 手动创建接口试图创建退款；退款必须来自官方账单导入 |
 | 422 | UNSUPPORTED_SOURCE_FILE | 文件格式或平台不支持 |
-| 422 | IMPORT_COVERAGE_INCOMPLETE | 文件范围、声明行数或解析完整性不足；不得生成缺失手动交易核对项 |
 | 422 | SOURCE_PROFILE_SELECTION_REQUIRED | 多个来源账户档案均可能对应当前文件，需要用户选择一次 |
-| 422 | REFUND_ORIGINAL_NOT_RESOLVED | 退款行未能按平台规则唯一关联原消费；不创建退款交易，保留原始证据并报告该行失败 |
 | 422 | SOURCE_MAPPING_REQUIRED | 当前来源无法按既有映射安全处理 |
 | 500 | INTERNAL_ERROR | 未预期的服务端错误；返回 request_id，不暴露内部堆栈 |
 
@@ -848,10 +848,11 @@ POST /api/v1/relationship/binding
 1. 接口分组是否与 M1–M5 业务模块和五个产品区域对应。
 2. 前端是否能仅依赖这些接口完成账户、账单、首页、预算、绑定与官方导入的核心操作。
 3. 交易创建/编辑/删除与资金变动的原子边界是否足够清楚。
-4. 导入匹配与人工处理接口是否符合“尽量自动、必要时处理、不建设复杂异常中心”的要求。
-5. POST /relationship/binding 的绑定凭据获取方式仍未确定，需在实现绑定功能前补充规则。
-6. 退款到账账户与原消费账户不同时，资金份额恢复应落在哪个账户；以及原消费为 credit_purchase、没有现金扣减份额时如何分配退款，均需补充业务规则后再实现相关组合。
-7. 修改账户记账起始日期时，若历史交易状态变化，如何安全重建该账户的有效资金变动，需要在物理模型和测试阶段落实原子重算边界。
+4. 导入匹配与核对项操作是否符合“尽量自动、必要时处理、不建设复杂异常中心”的要求。
+5. POST /relationship/binding 的绑定凭据获取方式仍未确定，需在关系绑定功能实现前补充规则。
+6. 官方退款的唯一原消费关系由平台专用解析器建立；若解析失败，只产生行级错误，不提供用户手工猜选原消费的常规操作。
+7. 修改账户记账起始日期时，若历史交易状态变化，如何安全重建该账户的有效资金变动，需要在相关功能实现前落实原子重算边界。
+8. 起始日前原消费在之后发生退款时，原交易可能没有可逆序恢复的当前资金份额；该边界需在实现此类场景前明确，不阻塞普通退款流程。
 
 ### 当前状态与后续顺序
 
@@ -861,7 +862,7 @@ POST /api/v1/relationship/binding
 
 后续顺序：
 
-1. 审阅退款来源未找到原消费时的独立解析动作，以及导入后核对项的状态/确认接口。
+1. 最终核对来源账户档案、行级支付渠道映射、覆盖完整性、状态更新和核对项生命周期与逻辑数据模型一致。
 2. 选择首期产品形态、技术栈、数据位置与认证方式。
 3. 设计物理 Schema、约束、索引与迁移。
 4. 从最小可运行垂直切片开始实现，并按 IMPLEMENTATION_PLAN.md 验收。
