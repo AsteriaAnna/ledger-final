@@ -12,7 +12,7 @@
 | Account | M2 | holder_user_id、custodian_user_id、name、account_type、opening_date、version；实际账户；不另存可写余额 |
 | Transaction | M3 | owner、type、accounting_semantics、amount_minor、occurred_at、category_code、merchant、note、可选source_account_profile_id、refund_kind、affects_spending、version |
 | TransactionAccountEffect | M3 | transaction、account、role、signed_amount_minor、status；applied或historical_only |
-| AccountFundMovement | M2/M3 | account、fund_owner、fund_type、signed_amount_minor、reason、operation_group、可选effect、effective_at |
+| AccountFundMovement | M2 | account、fund_owner、fund_type、signed_amount_minor、reason、operation_group、可选effect、effective_at |
 | SourceAccountProfile | M4 | owner、platform、label、可选账号指纹、metadata；昵称不作唯一身份 |
 | SourcePaymentMethodMapping | M4 | owner、profile、canonical_method_key、account_id、version；unique(profile,key) |
 | ImportBatch | M4 | owner、文件指纹、导出时间、声明范围/类型/行数、实读数、profile可空、status、profile_version、汇总 |
@@ -22,6 +22,8 @@
 | MonthlyBudget | M5 | owner、month、amount_minor、version；unique(owner,month) |
 
 行处理结果放在batch/observation的处理字段或派生视图，不新建工作流实体。用户确认的转账角色与关联决定保存在来源处理字段，不混入raw_fields，不随重导重置；官方重要事实变化时重新校验。观察在档案未定时只关联batch，档案确定后再关联SourceRecord。一来源最多关联一笔有效交易，一交易可有多条来源。
+
+M2唯一拥有资金变动记录及扣减/回补/分配算法；M3拥有交易与effects，复用M2规则生成资金计划。初始分配、手动分配与交易影响可以产生同一种资金记录，但不因此形成多个所有者或第二套算法。
 
 ## 2. 资金真相
 
@@ -45,7 +47,7 @@ Transaction.source_account_profile_id用于手动明确声明来源或官方创�
 
 任何修改、删除使当前份额负值则整笔拒绝。删除仅撤销本交易、effects和movements；清空相关SourceRecord当前关联，保留来源观察，消费与退款互不级联。
 
-M3保存交易、effects、movements与M4来源关联必须在同一Unit of Work提交。失败不得留下半笔账务、单边转账或悬空当前关联。version条件比较按API执行；来源身份唯一和资金守恒始终是业务约束。
+应用用例协调同一Unit of Work：M3保存交易/effects，M2保存资金变动，M4保存当前来源关联；各模块不直接写对方记录。失败不得留下半笔账务、单边转账或悬空当前关联。version条件比较按API执行；来源身份唯一和资金守恒始终是业务约束。
 
 ## 5. 来源生命周期
 
@@ -75,7 +77,7 @@ V1任一行unsupported、needs_review或failed则该batch不自动生成缺失�
 
 实体有直接owner或可追溯归属。一次操作验证batch、source、profile、mapping、account、transaction的本人权限与相互关系。对象只读账单不返回raw_fields、对方账号或文件。
 
-M5按已保存expense减启用抵减的refund，余额来自有效movements。历史交易可参与消费但不影响余额。Category仅受控字典/other，不增加用户分类管理模块；没有费用转账、负债、跨个人账本写入模型。
+M5按已保存expense减启用抵减的refund，余额来自M2有效movements。M5不是交易提交的依赖，查询时读取正式结果，不要求每笔保存同步刷新统计。历史交易可参与消费但不影响余额。Category仅受控字典/other，不增加用户分类管理模块；没有费用转账、负债、跨个人账本写入模型。
 
 ## 8. 对外版本与字段投影
 

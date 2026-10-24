@@ -610,7 +610,7 @@ paths:
       summary: 手动创建交易
       description: '使用环节：手动记账提交。
 
-        成功/副作用：统一M3创建income/expense/无费transfer；semantics按type派生，不让客户端选；有效端改变资金，历史端只保存事实；更新相关月份统计。
+        成功/副作用：统一M3创建income/expense/无费transfer；semantics按type派生，不让客户端选；有效端改变资金，历史端只保存事实；后续查询按新交易计算相关月份统计。
 
         异常/边界：禁止refund和客户端accounting_semantics/user_id/余额/源证据；未来时间/同账户转账422；金额/份额不足整笔409；转账两端无单边成功；不同键代表新意图。'
       parameters:
