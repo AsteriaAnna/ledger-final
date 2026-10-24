@@ -58,6 +58,7 @@ erDiagram
     SOURCE_ACCOUNT_PROFILE ||--o{ IMPORT_RECONCILIATION_ITEM : scopes_review
     TRANSACTION ||--o{ IMPORT_RECONCILIATION_ITEM : reviewed
     IMPORT_BATCH ||--o{ IMPORT_RECONCILIATION_ITEM : first_detected
+    IMPORT_BATCH o|--o{ IMPORT_RECONCILIATION_ITEM : last_checked
 ~~~
 
 ## 3. 核心实体与职责
