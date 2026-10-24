@@ -1,875 +1,183 @@
-# 星账｜API 契约
+# 星账｜API契约
 
-> 2026-10-24：本版已同步独立退款机制，详见[导入识别机制与实验](IMPORT_RECOGNITION.md)。本轮验证字段提取与统计，不代表完整导入或资金份额账务已经验收。
+候选HTTP契约，尚无已部署API。依据[业务规则](BUSINESS_RULES_DISCUSSION.md)、[逻辑模型](LOGICAL_DATA_MODEL.md)，模块职责见[模块边界](ENGINEERING_MODULE_BOUNDARIES.md)。
 
-**版本：** v0.4  
-**阶段：** API 契约设计稿  
-**状态：** 候选契约，待审阅  
-**业务基线：** [核心业务规则 v2.8（已冻结）](BUSINESS_RULES_DISCUSSION.md)  
-**数据基线：** [逻辑数据模型 v0.5](LOGICAL_DATA_MODEL.md)  
-**产品基线：** [产品功能地图 v0.4](PRODUCT_FUNCTION_MAP.md)
+## 1. 通用规则
 
-本文把已冻结的业务规则和逻辑数据模型转换为前后端共同遵守的接口约定。接口路径与 HTTP/JSON 形式是当前建议，不代表已确定技术栈、数据库、部署方式或认证供应商。
+前缀/api/v1。JSON请求响应，导入文件用multipart。ID为不透明字符串；金额整数分，交易amount_minor严格正整数，初始余额/预算非负，账户影响用带符号整数。日期YYYY-MM-DD，月份YYYY-MM；时间RFC3339必须带偏移，服务端规范化为+08:00解释日期/月界。记账时间不得未来。
 
-## 0. 契约原则
+写接口需要认证，不以user_id授权。view=mine默认，view=partner只允许明确开放的账户、账单只读查询；不能通过绑定写对方账本。逐项校验资源归属与关联，不只校验URL中的batch。
 
-1. **前端请求业务操作，不直接修改账务底层记录。** 前端不能直接写账户余额或任意写入资金变动。
-2. **后端统一执行账务规则。** 手动记账、官方账单导入、交易编辑与退款都必须经过同一套交易处理规则；但手动创建交易只允许收入、支出和转账，退款只能由官方账单导入创建。
-3. **交易事实、账户影响、资金变动分开表达。** 但需要在一次业务操作内原子完成相关更新。
-4. **身份来自已验证的登录上下文。** 写接口不接受客户端传入的 user_id 作为授权依据。
-5. **绑定只扩大读取范围，不扩大写权限。** 对方的账户和交易可以只读查看，不能通过 API 修改。
-6. **金额使用整数分。** 不用浮点数表示货币。
-7. **重复请求不能重复入账。** 新建交易、文件导入等写操作支持幂等处理。
-8. **失败必须明确。** 账务校验失败时不允许只成功写入一部分。
-9. **不为当前版本增加新产品流程。** 不提供账户删除、解绑、负债账户、余额不足/透支管理或截图识别接口。
-10. **跨客户端共享同一契约。** 桌面端与 Android 端调用同一套业务 API 和账务规则；平台差异由客户端适配层处理。
+成功为data，列表带page.next_cursor；错误为error.code/message/field_errors/request_id。不存在或不应暴露的资源返回404；已明确可读但不可写的对象资源返回403。
 
-## 1. 通用约定
+创建、导入、resolution、核对处理、资金调整带Idempotency-Key。同键相同请求返回原结果，同键不同请求409 IDEMPOTENCY_KEY_CONFLICT。用户新操作使用新键；文件指纹不替代幂等操作或来源身份。PATCH/PUT带version，资源变更返回新version；冲突409 RESOURCE_VERSION_CONFLICT。所有账务写操作原子提交，失败不返回成功。
 
-### 1.1 基础格式
+## 2. 接口与业务模块
 
-- 建议 API 前缀：**/api/v1**
-- 请求与响应：JSON；文件导入使用 multipart/form-data
-- ID：不透明字符串，客户端不得依赖其内部格式
-- 金额：整数分，例如人民币 ¥12.34 表示为 1234。交易本身的 amount_minor 始终为正整数；账户影响与资金变动用正负号表示流入/流出。
-- 日期：YYYY-MM-DD
-- 日期时间：ISO 8601 / RFC 3339，必须携带时区偏移
-- 月份：YYYY-MM
-- 枚举值使用稳定的英文代码；显示文案由前端本地化
-- 所有写接口均要求已验证的登录上下文；登录方式和 token 签发服务由后续技术选型决定
-
-### 1.2 成功响应
-
-单个资源：
-
-~~~json
-{
-  "data": {
-    "id": "opaque-id",
-    "example": "value"
-  }
-}
-~~~
-
-列表：
-
-~~~json
-{
-  "data": [],
-  "page": {
-    "next_cursor": null
-  }
-}
-~~~
-
-成功响应中的业务结果必须表示已经完成的操作，不能在后台仍未保存时返回“记账成功”。如果文件导入需要异步处理，必须返回明确的处理中状态，而不是伪装成已完成。
-
-### 1.3 错误响应
-
-所有 API 使用统一错误结构：
-
-~~~json
-{
-  "error": {
-    "code": "INVALID_REFUND_FIELDS",
-    "message": "退款金额、日期或抵减花销设置不合法。",
-    "field_errors": [],
-    "request_id": "request-id"
-  }
-}
-~~~
-
-- code：稳定的机器可读错误码。
-- message：可供前端展示的简明说明，不包含敏感信息。
-- field_errors：可选字段校验详情。
-- request_id：用于定位服务端日志；不要求前端理解内部实现。
-
-### 1.4 幂等与并发
-
-- 创建交易、上传导入文件及导入结果处理等写操作应支持 Idempotency-Key。
-- 同一个幂等键和相同请求重复提交，只返回同一业务结果，不重复创建交易或重复执行资金变动。
-- 同一交易的并发编辑不能静默覆盖。资源响应提供 version；更新请求带上读取到的版本。版本不匹配时返回 409 RESOURCE_VERSION_CONFLICT，前端提示刷新后重试。
-- 幂等键和 version 是接口层的行为约定；其存储与实现方式不在本文件决定。
-
-## 2. 身份、数据范围与权限
-
-### 2.1 数据范围
-
-只读查询可以使用 view 参数：
-
-- view=mine：当前登录用户自己的数据，默认值。
-- view=partner：已绑定对象的数据；仅允许读取账户和账单等明确开放的内容。
-
-客户端不传任意 user_id 来切换数据范围。后端根据当前登录身份和有效绑定关系解析 view=partner。
-
-### 2.2 权限矩阵
-
-| 资源/操作 | 自己的数据 | 已绑定对象的数据 |
+| 模块 | 方法与路径 | 行为 |
 |---|---|---|
-| 查看账户与账户内资金 | 允许 | 只读允许 |
-| 新建/编辑账户 | 允许 | 禁止 |
-| 调整资金归属与性质 | 允许 | 禁止 |
-| 查看账单 | 允许 | 只读允许 |
-| 新建/编辑/删除交易 | 允许 | 禁止 |
-| 查看个人预算 | 允许 | 不开放当前用户对对象预算的修改权限；对象预算不进入当前用户预算计算 |
-| 导入官方账单 | 允许导入到自己的账本 | 禁止写入对象账本 |
-| 绑定状态查询 | 允许 | 根据绑定关系返回必要状态 |
+| M1 | GET /relationship | 当前绑定状态、对象必要信息及只读权限 |
+| M1 | POST /relationship/binding | 消费有效binding_token完成绑定；无解绑 |
+| M2 | GET /accounts?view=mine；GET /accounts/{id} | 账户、起始日、计算余额/份额、read_only、version |
+| M2 | POST /accounts | 创建本人实际账户、初始状态 |
+| M2 | PATCH /accounts/{id} | name/account_type/custodian，不能直接改余额 |
+| M2 | PUT /accounts/{id}/opening-state | 原子修正初始日期/金额/份额及受影响状态 |
+| M2 | POST /accounts/{id}/fund-adjustments | 同账户等额合法份额调整 |
+| M3 | GET /transactions；GET /transactions/{id} | 列表/详情，支持view、日期、type、account、category、q、分页 |
+| M3 | POST /transactions | 手动创建income/expense/transfer，不能refund |
+| M3 | PATCH /transactions/{id}；DELETE /transactions/{id} | 编辑/仅删除当前交易，消费不级联退款 |
+| M3 | GET /transaction-categories | 受控分类代码、显示名及other兜底 |
+| M4 | POST /imports；GET /imports/{batchId} | 上传/读取文件结果、档案候选、分页行结果 |
+| M4 | POST /imports/{batchId}/resolutions | 选档案、补语义、创建/关联/恢复来源行 |
+| M4 | GET /source-payment-method-mappings?source_account_profile_id=... | 本人该档案渠道映射 |
+| M4 | PUT /source-payment-method-mappings | 更新本人档案渠道到本人Account的映射 |
+| M4 | POST /imports/{batchId}/reconciliation-reviews | 保留核对项，或经M3删除手动交易 |
+| M5 | GET /overview?month=YYYY-MM | 本人资金视图、个人净花销与预算，月份限当前/历史 |
+| M5 | GET/PUT /budgets/{month} | 本人月预算，允许合法未来月份 |
 
-**强制规则：** 隐藏前端按钮不是权限控制。所有写接口必须在服务端校验资源所属用户；对方数据的越权写入返回 403 FORBIDDEN，不能因为请求携带了对方资源 ID 就执行操作。
+无直接写AccountFundMovement接口；无账户删除、截图、负债、退款原消费关联接口。认证签发不在本业务API中假设供应商；binding_token的安全生成/过期由实施阶段实现。
 
-## 3. 接口总览
+## 3. M2：账户与份额
 
-| 模块 | 方法与路径 | 用途 |
+POST /accounts字段：name、account_type（cash/bank_card/wechat_balance/alipay_balance/other）、custodian（self/partner，默认self）、opening_date、opening_balance_minor、opening_allocations。allocation为fund_owner=self|partner、fund_type=liquid|savings、amount_minor。
+
+账户holder固定当前用户。partner仅绑定后可用，partner只能savings；份额非负且合计=初始金额。opening_date不得未来。响应含id、name、type、holder、custodian、opening_date、balance_minor、fund_shares、read_only、version。读取时holder/custodian/fund_owner中的self、partner均相对当前登录查看者；内部保存实际用户ID。写入仅本人账户，partner份额仍只能为存款；查看对象账户时可读到对象自己的流动资金，不将写限制误用于返回数据。
+
+fund_shares可含派生的savings_baseline_minor、savings_gap_minor供说明，不可直接PATCH。
+
+PUT opening-state带全部初始字段与version；原子重建本账户受影响交易的历史/有效状态，其他账户不改。不能安全重建则409 OPENING_STATE_RECALCULATION_CONFLICT。账户余额不通过覆盖字段修正。
+
+POST fund-adjustments含from/to两个合法份额与正amount_minor。同账户来源份额足够，净额0；调整改变相应存款基准和当前份额，不计收支。返回计算结果与新version，不允许对对象账户操作。
+
+## 4. M3：交易字段、写入和编辑
+
+### 4.1 合法组合
+
+| type | accounting_semantics | 账户字段 | 退款字段 |
+|---|---|---|---|
+| income | ordinary | account_id | 禁止 |
+| expense | ordinary | account_id | 禁止 |
+| transfer | internal_transfer | from_account_id、to_account_id（不同） | 禁止 |
+| refund | refund_inflow | account_id（实际到账） | refund_kind、affects_spending必需 |
+
+refund_kind=merchant_refund|transfer_return；默认affects_spending分别true/false。严格布尔，不接受null或字符串。手动POST只接受前三行；M4内部命令可携带已验证SourceRecord创建refund，HTTP手动入口不能伪造此证明。非refund携退款字段422；original_transaction_id不是合法字段。
+
+公共字段：amount_minor、occurred_at、category_code（缺省other）、merchant、note；可选source_account_profile_id表示本人明确声明平台账号来源。M3验证source profile、Account均本人可写；内部transfer两端都本人可写、资金为本人流动，等额反向。历史交易仍保存，不生成历史端资金影响。
+
+POST例：
+
+```json
+{"type":"expense","accounting_semantics":"ordinary","account_id":"a","amount_minor":2580,"occurred_at":"2026-10-20T12:30:00+08:00","category_code":"other","merchant":"午餐","note":""}
+```
+
+响应data含transaction（全部公开业务字段、version）、account_effects（account_id、role=primary|from|to、status=applied|historical_only、signed_amount_minor）、fund_shares摘要、notices。notice可为OWN_SAVINGS_USED或PARTNER_SAVINGS_USED及金额，提醒不意味着债务。
+
+详情额外含source_summaries数组：source_record_id、platform、只读source_occurred_at、可展示来源摘要；本人可看必要证据，对象不返回raw_fields、对方账号或batch下载信息。列表支持from/to（北京时间包含边界日期）、type、account_id、category_code、q、limit/cursor。
+
+### 4.2 编辑白名单
+
+PATCH带version；公共可编辑金额、occurred_at、category_code、merchant、note、适用账户字段。普通交易可在前三类间变更且同时提供合法组合。已有refund不能改type、accounting_semantics、refund_kind或来源时间，仅公共字段、account_id、affects_spending可编辑。源时间/原始字段只读；不接受手动普通类型变refund。
+
+退款编辑例：
+
+```json
+{"occurred_at":"2026-08-15T12:00:00+08:00","affects_spending":false,"version":3}
+```
+
+响应返回新transaction/version、source_summaries、account_effects与affected_months。仅开关不改资金；仅改日期且effect历史/有效状态不变保留份额计划；跨起始日撤销/生成本交易影响。金额/账户变化按业务规则处理，非法或撤销导致份额负值整笔409，不重算后续全部交易。
+
+DELETE使用If-Match携当前version，版本不匹配409；仅撤销当前交易，保留并解关联来源。新导入操作可恢复；删除消费不删refund。失败原子回滚，不留下空资金或悬空当前关联。
+
+## 5. M4：导入、恢复、去重与展示
+
+### 5.1 上传与来源档案
+
+POST /imports上传file，可带source_account_profile_id与Idempotency-Key。自动判平台/文件格式，读取原始全部行。返回batch_id与version，即使档案未定仍保存本人批次和观察，返回profile_candidates与rows，不需要重复上传。无法读取的文件返回422 UNSUPPORTED_SOURCE_FILE；其余可读文件按行表达失败，不把一行错误当整批成功。
+
+档案规则：明确外部标识匹配已有本人档案则复用；无标识且只有一个本人同平台档案可按既有选择复用并保留证据；多个候选不明时needs_review，首次则返回可创建选项。不能把昵称当永久ID。用户在现有resolutions中选择已有profile，或提供create_label创建本人档案，不新增独立档案管理页面。
+
+### 5.2 逐行结果
+
+GET /imports/{batchId}?limit=...&cursor=...返回batch公共头、全批summary、分页rows、独立reconciliation_items及其游标。每行含：observation_id、row_number、可空source_record_id、phase、disposition、reason_codes、evidence、candidate、可空transaction_id、allowed_actions。candidate不是已保存交易。
+
+phase限定file_read/profile_resolution/normalization/account_resolution/transaction_resolution/posted；disposition为created、linked_existing、duplicate_existing、unsupported、ineffective、needs_review、failed。批次同步处理一次后返回completed或needs_review（存在needs_review/failed），无法完成批次返回failed；unsupported和ineffective为终态且明确展示，不能称为成功入账。
+
+summary包含read_rows、created、linked_existing、duplicate_existing、unsupported、ineffective、needs_review、failed。read_rows=parsed_record_count=七类合计。manual_transactions_not_found/reconciliation_items_rechecked另计，不能填补行数。phase和来源观察状态更新不参与计数加法。补处理后以当前各行结果重新汇总，不累计加两次created。
+
+示例（虚构ID）：
+
+```json
+{
+  "data": {
+    "batch_id":"b", "platform":"wechat", "status":"needs_review", "version":1,
+    "source_account_profile":{"id":"p","label":"微信账号"},
+    "summary":{"read_rows":1,"created":0,"linked_existing":0,"duplicate_existing":0,"unsupported":0,"ineffective":0,"needs_review":1,"failed":0,"manual_transactions_not_found":0,"reconciliation_items_rechecked":0},
+    "coverage":{"structural_complete":true,"declared_from":"2026-09-01T00:00:00+08:00","declared_to":"2026-09-30T23:59:59+08:00","exported_at":"2026-09-30T20:00:00+08:00","effective_from":"2026-09-01T00:00:00+08:00","effective_to":"2026-09-30T20:00:00+08:00","declared_record_count":1,"parsed_record_count":1,"reconciliation_eligible":false,"blockers":["SOURCE_MAPPING_REQUIRED"]},
+    "rows":[{"observation_id":"o","row_number":32,"source_record_id":"s","phase":"account_resolution","disposition":"needs_review","reason_codes":["SOURCE_MAPPING_REQUIRED"],"evidence":{"source_kind":"商户-退款","source_status":"已退款¥0.70","account_evidence":"支付方式=零钱"},"candidate":{"type":"refund","accounting_semantics":"refund_inflow","amount_minor":44,"source_occurred_at":"2026-09-27T12:08:36+08:00","occurred_at":"2026-09-27T12:08:36+08:00","account_hint":"微信零钱","account_id":null,"refund_kind":"merchant_refund","affects_spending":true},"transaction_id":null,"allowed_actions":[]}],
+    "reconciliation_items":[]
+  },
+  "page":{"next_cursor":null,"reconciliation_next_cursor":null}
+}
+```
+
+allowed_actions只列当前可执行动作；上例先通过PUT补映射，GET刷新后可出现create_transaction，未补齐前不允许创建。
+
+### 5.3 账户映射与resolution
+
+GET映射按source_account_profile_id过滤。PUT请求source_account_profile_id、canonical_method_key、account_id、可选已有映射version；首次创建无version，更新必需。唯一(profile,key)，钱包与档案对应，不允许不同账号钱包串用；银行卡跨档案可经确认映射同一Account。目标只允许当前用户账户。更新只影响后续/未完成来源，不追改已入账交易。
+
+POST /imports/{batchId}/resolutions请求action与version（batch版本），行操作带observation_id；已存在source时同时验证其当前身份，防止旧页面处理错来源。batch响应包含version，接受的resolution更新版本；过期页面返回409。
+
+| action | 输入 | 行为 |
 |---|---|---|
-| M5 预算与统计 | GET /api/v1/overview?month=YYYY-MM | 首页资金总览与个人消费指标 |
-| M2 账户与资金归属 | GET /api/v1/accounts?view=mine | 账户列表及余额/份额摘要 |
-| M2 账户与资金归属 | POST /api/v1/accounts | 创建实际账户并设置初始资金 |
-| M2 账户与资金归属 | GET /api/v1/accounts/{accountId} | 查看账户详情 |
-| M2 账户与资金归属 | PATCH /api/v1/accounts/{accountId} | 编辑账户名称等基本信息 |
-| M2 账户与资金归属 | PUT /api/v1/accounts/{accountId}/opening-state | 修正初始余额、起始日期与初始份额 |
-| M2 账户与资金归属 | POST /api/v1/accounts/{accountId}/fund-adjustments | 在同一账户内调整资金归属/性质 |
-| M3 交易账务 | GET /api/v1/transactions?view=mine | 账单列表、搜索与筛选 |
-| M3 交易账务 | POST /api/v1/transactions | 手动创建收入、支出或转账；退款只能由官方导入创建 |
-| M3 交易账务 | GET /api/v1/transactions/{transactionId} | 查看账单详情 |
-| M3 交易账务 | PATCH /api/v1/transactions/{transactionId} | 编辑既有交易 |
-| M3 交易账务 | DELETE /api/v1/transactions/{transactionId} | 仅删除当前交易；消费与退款互不级联 |
-| M5 预算与统计 | GET /api/v1/budgets/{month} | 查看当前用户该月预算 |
-| M5 预算与统计 | PUT /api/v1/budgets/{month} | 创建或修改当前用户该月预算 |
-| M3 交易账务 | GET /api/v1/transaction-categories | 读取当前支持的分类字典 |
-| M1 身份与关系 | GET /api/v1/relationship | 查询绑定状态 |
-| M1 身份与关系 | POST /api/v1/relationship/binding | 完成绑定；绑定凭据的获取方式仍待身份/关系流程设计 |
-| M4 导入与来源证据 | POST /api/v1/imports | 上传微信/支付宝官方账单 |
-| M4 导入与来源证据 | GET /api/v1/imports/{batchId} | 查看一次导入的结果与必要的待处理记录 |
-| M4 导入与来源证据 | POST /api/v1/imports/{batchId}/resolutions | 处理确实无法自动唯一匹配的来源记录 |
-| M4 导入与来源证据 | GET /api/v1/source-payment-method-mappings?platform=... | 查看行级支付渠道映射 |
-| M4 导入与来源证据 | PUT /api/v1/source-payment-method-mappings | 新建或更新行级支付渠道映射 |
+| select_source_profile | profile_id或create_label，二选一 | 仅profile未定的batch可用；验证本人同平台档案，建立/关联来源并重新评估。确定后同batch不换档案，避免变命名空间重复入账 |
+| set_transfer_role | observation_id、type=income/expense/transfer及必要账户字段 | 只用于角色不明的转账行；与已知方向/账户证据一致，不能改普通消费或unsupported费用行 |
+| create_transaction | observation_id | 服务端依据已识别来源和当前映射创建income/expense/transfer/**refund**；不能提交自造金额/原消费ID绕过来源 |
+| link_existing_transaction | observation_id、transaction_id | 本人确认同一事件；type、方向、金额、账户组合兼容；refund只关联同一refund，不连原消费 |
+| accept_source_change | observation_id | 用户确认以这次官方观察更新当前来源事实，仅更新来源并记录差异已确认，保留现有交易；需修正交易时另经M3编辑，不静默覆盖 |
 
-这些是业务操作接口。底层的 AccountFundMovement 不提供任意新增、编辑或删除接口；资金变动由账户初始状态、交易、退款、转账、导入或手动分配调整等受控操作生成。
+映射补齐后在现有batch中create_transaction即可恢复，不重新上传。POSSIBLE_EXISTING_TRANSACTION时，此动作表示用户确认是另一笔新事件，可越过弱字段候选，但不能绕过稳定来源唯一性、账户权限和M3校验。同幂等键优先重放原结果；新键须先验证batch版本，过期返回409。版本有效且来源已成功时返回既有transaction_id，不重建。unsupported、ineffective、failed行不开放create/link账务动作，错误按原因修复文件/字段后新导入；role确认只用于普通转账。仅选择有效观察不允许忽略另一笔更晚官方事实；相同导出时刻冲突可通过accept_source_change选明一次观察。
 
-## 4. M5：首页总览与个人预算
+### 5.4 执行顺序与原子性
 
-### 4.1 获取首页总览
+读所有行并保存观察→确定profile→规范化并校验→处理最新来源状态→映射/角色解析→查已有稳定关联与同事件候选→对可创建行按记账时间升序调用M3→原子关联source→汇总。相同秒按official_transaction_id文本升序作为确定性次序；这是计算约定，不声称平台真实先后。首次导入不按Excel倒序逐行扣存款。新批次插入历史交易仍按当前有效资金规则处理，不重算已存在后续份额。
 
-GET /api/v1/overview?month=2026-10
+单笔业务事务涵盖M3账务与SourceRecord关联；批次允许部分行成功，其余明确失败/待处理，失败不回滚已完成的其他行。来源观察可先持久保存，不能因此报告created。并发版本和来源唯一约束保证同来源不重复创建。
 
-返回示例：
+同幂等键重试原结果；新导入操作即使文件相同也检查来源当前关联。存在有效交易duplicate_existing；交易被删/从未成功则重新处理。旧导出只留观察不覆盖新状态；同导出时刻冲突needs_review；已入账后官方重要事实改变needs_review。履约状态变化不重新入账，失败→成功且无交易则可创建。
 
-~~~json
-{
-  "data": {
-    "month": "2026-10",
-    "as_of_date": "2026-10-20",
-    "relationship_status": "bound",
-    "funds": {
-      "my_liquid_minor": 100000,
-      "my_savings_minor": 300000,
-      "partner_liquid_minor": 80000,
-      "partner_savings_minor": 120000,
-      "visible_total_minor": 600000
-    },
-    "personal_spending": {
-      "month_spent_minor": 320000,
-      "daily_average_minor": 16000,
-      "previous_month_daily_average_minor": 15000,
-      "daily_change_minor": 1000,
-      "daily_change_rate": 0.0667,
-      "projected_month_spending_minor": 496000
-    },
-    "budget": {
-      "budget_minor": 300000,
-      "spent_minor": 320000,
-      "remaining_minor": 0,
-      "over_budget_minor": 20000,
-      "status": "over_budget"
-    }
-  }
-}
-~~~
+### 5.5 核对范围及处理
 
-规则：
+coverage分别返回结构完整、声明范围、导出时刻、effective范围与核对资格；effective_to<=exported_at。声明/实读不符、源ID/时间不明或非全量则不核对。V1只要本batch有unsupported、needs_review或failed则reconciliation_eligible=false，仍展示/保存可处理行。
 
-- funds 按资金归属人与资金性质聚合，不按账户持有人简单相加，避免把代为保管的对象存款误算成自己的钱。
-- 未绑定时，对象两项资金为 null 或按约定省略；不得伪造为 0 元的真实账户记录。绑定后同时返回四类资金。
-- visible_total_minor 是当前用户有权查看的资金份额合计，不代表这些资金全部属于当前用户。
-- personal_spending 与 budget 只计算当前用户自己的消费，不混入对象消费。
-- 退款按自身occurred_at所在月份及affects_spending抵减花销；官方原始时间不随编辑改变。
-- 日均花销、变化率和本月预计花销按业务规则 v2.8 的公式计算。
-- 超支时 status=over_budget、over_budget_minor 为正数，前端显示红色“已超支 ¥X”；未超支时显示剩余额度。
-- 当上月日均为零时的特殊展示已被业务规则列为非阻塞边界，不在本契约中增加新业务流程。
+只核对明确属于该profile及实际账户、有效日期范围且无官方来源关联的手动交易。银行卡只有account_id不够，必须手动明确source_account_profile_id；已确认余额账户可由唯一映射确定。已有来源的退款不会因编辑occurred_at生成缺失提示。
 
-### 4.2 查看与设置预算
+POST reconciliation-reviews带reconciliation_item_id、action=keep_manual|delete_manual_transaction、version。keep仅改核对状态；delete调用M3删除交易及自身资金影响，并原子关闭核对项。后续匹配来源自动结案。重复范围复用同一项、只新建项首次提示，不自动删交易。
 
-GET /api/v1/budgets/2026-10
+## 6. M5：统计与预算
 
-PUT /api/v1/budgets/2026-10
+GET overview返回month、as_of_date、relationship_status、funds（my_liquid_minor、my_savings_minor、partner_liquid_minor、partner_savings_minor、visible_total_minor）、personal_spending、budget。未绑定对象份额为null，绑定后四类同屏；visible_total是可见合计，不代表全归本人。
 
-请求：
+personal_spending含expense_minor、refund_offset_minor、month_spent_minor（前两者之差，允许负）、daily_average_minor、previous_month_daily_average_minor、daily_change_minor、daily_change_rate（可null）、projected_month_spending_minor。budget含budget_minor、spent_minor、remaining_minor、over_budget_minor、status=within_budget|over_budget；预算未设置时budget=null。
 
-~~~json
-{
-  "budget_minor": 300000
-}
-~~~
+计算范围、天数与舍入严格使用业务规则§6；as_of_date为当前月今天、历史月末日；账户funds是当前可见资金，不伪装成历史月余额。预算PUT含budget_minor、已有资源version；初次创建无version，返回新version。本人交易统计不混对象消费。
 
-响应：
+## 7. 错误与权限校验
 
-~~~json
-{
-  "data": {
-    "month": "2026-10",
-    "budget_minor": 300000,
-    "version": 1
-  }
-}
-~~~
-
-- 预算按当前登录用户与月份唯一。
-- PUT 为该月预算的创建或替换，不接受 user_id。
-- 对象消费不扣减当前用户预算。
-- 负金额、非整数金额或无效月份返回 422 VALIDATION_ERROR。
-
-## 5. M2：账户与资金归属
-
-### 5.1 创建账户
-
-POST /api/v1/accounts
-
-请求：
-
-~~~json
-{
-  "name": "微信零钱",
-  "account_type": "wechat_balance",
-  "custodian": "self",
-  "opening_date": "2026-10-01",
-  "opening_balance_minor": 500000,
-  "opening_allocations": [
-    {
-      "fund_owner": "self",
-      "fund_type": "liquid",
-      "amount_minor": 100000
-    },
-    {
-      "fund_owner": "self",
-      "fund_type": "savings",
-      "amount_minor": 300000
-    },
-    {
-      "fund_owner": "partner",
-      "fund_type": "savings",
-      "amount_minor": 100000
-    }
-  ]
-}
-~~~
-
-account_type 是当前候选分类：cash、bank_card、wechat_balance、alipay_balance、other。实际账户名称仍由用户填写。
-
-约束：
-
-- 账户记录归属当前登录用户；不允许通过请求体指定另一个用户作为账户所有者。
-- custodian 可为 self 或 partner，默认 self；其含义仅为实际保管关系，不授予编辑权限。partner 仅在双方已绑定时允许。
-- opening_balance_minor 必须是非负整数；初始份额金额之和必须与其完全相等。
-- fund_owner=partner 仅允许 fund_type=savings，且仅绑定后可用。
-- 初始资金通过后端创建初始 AccountFundMovement 生成；不把初始余额当作收入。
-- 不提供删除账户接口。
-
-### 5.2 账户列表与详情
-
-GET /api/v1/accounts?view=mine
-
-GET /api/v1/accounts/{accountId}
-
-响应中的余额与份额为计算结果：
-
-~~~json
-{
-  "data": {
-    "id": "account-id",
-    "name": "微信零钱",
-    "account_type": "wechat_balance",
-    "holder": "self",
-    "custodian": "self",
-    "opening_date": "2026-10-01",
-    "balance_minor": 500000,
-    "fund_shares": [
-      {"fund_owner": "self", "fund_type": "liquid", "amount_minor": 100000},
-      {"fund_owner": "self", "fund_type": "savings", "amount_minor": 300000},
-      {"fund_owner": "partner", "fund_type": "savings", "amount_minor": 100000}
-    ],
-    "read_only": false,
-    "version": 1
-  }
-}
-~~~
-
-- 查询对象账户时，read_only=true。
-- balance_minor 必须等于所有有效资金变动之和。
-- fund_shares 的合计必须等于 balance_minor。
-- 不允许直接 PATCH balance_minor 或直接覆盖 fund_shares。
-
-### 5.3 编辑账户基本信息
-
-PATCH /api/v1/accounts/{accountId}
-
-允许字段：name、account_type、custodian。
-
-不允许通过该接口修改余额、资金份额、账户持有人或记账起始日期。初始状态使用专门接口处理。
-
-### 5.4 修正初始状态
-
-PUT /api/v1/accounts/{accountId}/opening-state
-
-请求：
-
-~~~json
-{
-  "opening_date": "2026-10-01",
-  "opening_balance_minor": 500000,
-  "opening_allocations": [
-    {"fund_owner": "self", "fund_type": "liquid", "amount_minor": 100000},
-    {"fund_owner": "self", "fund_type": "savings", "amount_minor": 300000},
-    {"fund_owner": "partner", "fund_type": "savings", "amount_minor": 100000}
-  ],
-  "version": 1
-}
-~~~
-
-- 初始金额、起始日期和初始份额必须作为一个原子操作处理。
-- 后端检查金额合计、归属组合、绑定状态和版本。
-- 修改起始日期后，后端必须重新判断该账户关联交易的 applied / historical_only 状态，并保证当前账户余额和资金份额一致；不修改交易事实或其他账户的数据。
-- 如果修改起始日期会导致既有资金变动无法在当前规则下安全重建，返回 409 OPENING_STATE_RECALCULATION_CONFLICT，不允许只更新日期而留下部分旧账。该冲突处理不扩展成新的核对产品流程。
-- 初始余额修正不能通过直接覆盖当前余额完成，也不计为收入或支出。
-
-### 5.5 手动调整资金归属/性质
-
-POST /api/v1/accounts/{accountId}/fund-adjustments
-
-请求：
-
-~~~json
-{
-  "from": {"fund_owner": "self", "fund_type": "savings"},
-  "to": {"fund_owner": "self", "fund_type": "liquid"},
-  "amount_minor": 50000
-}
-~~~
-
-响应：
-
-~~~json
-{
-  "data": {
-    "account_id": "account-id",
-    "balance_minor": 500000,
-    "fund_shares": [
-      {"fund_owner": "self", "fund_type": "liquid", "amount_minor": 150000},
-      {"fund_owner": "self", "fund_type": "savings", "amount_minor": 250000},
-      {"fund_owner": "partner", "fund_type": "savings", "amount_minor": 100000}
-    ]
-  }
-}
-~~~
-
-- 仅允许同一账户内的等额分配调整。
-- amount_minor 必须为正整数，来源份额必须足够。
-- 调整前后资金组合都必须合法；对象份额仅允许存款。
-- 该操作生成同一操作分组中的一条负向与一条正向 AccountFundMovement。
-- 账户总额不变；不计收入、消费或普通转账。
-- 不允许通过该接口调整另一个用户的账户。
-
-## 6. M3：交易账务与账单
-
-### 6.1 交易类型与账务语义
-
-交易类型：
-
-- income：收入
-- expense：支出
-- transfer：内部转账
-- refund：真实退款（仅由官方账单导入流程创建，不属于手动记账可选类型）
-
-内部账务语义 accounting_semantics 用于表达类型无法单独决定的现金影响与统计规则：
-
-- ordinary：普通收入或支出
-- credit_purchase：信用消费，计入消费统计，不扣减受管理现金账户
-- credit_repayment：信用还款，减少实际付款账户余额，但不计入消费统计
-- internal_transfer：内部转账，不计收入或消费
-
-语义必须与交易类型、账户影响相符；例如 credit_purchase 只允许与 expense 配合，internal_transfer 只允许与 transfer 配合。客户端可以提交候选语义，但后端必须校验其与交易字段、账户和来源证据相符，不能仅凭客户端传值绕过资金规则。
-
-退款新增字段：refund_kind=merchant_refund|transfer_return，affects_spending:boolean。occurred_at代表可编辑记账日期，source_occurred_at为只读来源字段。两种退款子类型均使用type=refund；不开放original_transaction_id。来源不明的退款子类型不能猜默认抵减，须明确待处理。官方字段与用户编辑分离；重导只更新来源观察，不静默覆盖日期和抵减开关。
-
-### 6.2 创建交易
-
-POST /api/v1/transactions
-
-普通支出请求示例：
-
-~~~json
-{
-  "type": "expense",
-  "accounting_semantics": "ordinary",
-  "occurred_at": "2026-10-20T12:30:00+08:00",
-  "amount_minor": 2580,
-  "account_id": "account-id",
-  "category_code": "food",
-  "merchant": "午餐",
-  "note": ""
-}
-~~~
-
-内部转账请求示例：
-
-~~~json
-{
-  "type": "transfer",
-  "accounting_semantics": "internal_transfer",
-  "occurred_at": "2026-10-20T12:30:00+08:00",
-  "amount_minor": 10000,
-  "from_account_id": "account-a",
-  "to_account_id": "account-b",
-  "note": "账户间转账"
-}
-~~~
-
-`POST /api/v1/transactions`仅接受income、expense、transfer；type=refund返回REFUND_REQUIRES_OFFICIAL_SOURCE。官方导入以到账账户、实际金额、原始时间与退款类型创建独立refund，并关联退款自身SourceRecord；不接受original_transaction_id。
-
-收入请求使用 type=income 和 account_id。信用消费可使用 type=expense、accounting_semantics=credit_purchase 且不提供受管理现金账户；信用还款使用 type=expense、accounting_semantics=credit_repayment 和实际付款账户。客户端不能将信用消费伪造成普通现金支出。
-
-后端行为：
-
-1. 校验字段和当前用户对账户的写权限。
-2. 校验交易类型、账务语义和账户组合。
-3. 创建 Transaction 与必要的 TransactionAccountEffect。
-4. 根据交易日期和每个账户的起始日期，判断账户影响是 applied 还是 historical_only。
-5. 对 applied 影响，按统一规则生成 AccountFundMovement。
-6. 在同一原子操作内验证账户余额、资金份额、转账两端、独立退款字段及官方来源身份。
-7. 返回正式保存结果与必要的存款使用提醒。
-
-退款边界见IMPORT_RECOGNITION.md：独立入账，不关联原消费；occurred_at默认官方退款时间，affects_spending按refund_kind默认，可编辑；来源证据和来源去重身份不随编辑改变。
-
-响应示例：
-
-~~~json
-{
-  "data": {
-    "transaction": {
-      "id": "transaction-id",
-      "type": "expense",
-      "amount_minor": 2580,
-      "version": 1
-    },
-    "account_effects": [
-      {"account_id": "account-id", "status": "applied", "amount_minor": -2580}
-    ],
-    "fund_usage": [
-      {"fund_owner": "self", "fund_type": "liquid", "amount_minor": 2580}
-    ],
-    "notices": []
-  }
-}
-~~~
-
-若使用自己的存款或对象存款，notices 返回对应的稳定代码与金额，例如 OWN_SAVINGS_USED、PARTNER_SAVINGS_USED。提醒不阻塞记账，也不代表系统认定任何一方欠另一方钱。
-
-### 6.3 交易列表与详情
-
-GET /api/v1/transactions?view=mine&from=2026-10-01&to=2026-10-31&type=expense&account_id=account-id&category_code=food&q=午餐&limit=50&cursor=...
-
-支持的筛选项：
-
-- view：mine 或绑定后的 partner
-- from、to：交易日期范围，包含边界日期
-- type：交易类型
-- account_id：关联账户
-- category_code：分类代码
-- q：商户、名称或备注的关键词
-- limit、cursor：分页
-
-GET /api/v1/transactions/{transactionId}返回交易事实、账户影响摘要、退款refund_kind与affects_spending、原始来源时间、来源关联摘要、read_only与version；不返回原消费关系。
-
-查询对象交易只读；不可将 view=partner 与写操作组合使用。
-
-### 6.4 编辑交易
-
-PATCH /api/v1/transactions/{transactionId}
-
-请求仅包含要修改的字段；若修改交易类型，必须同时提供新类型所需的账户字段。例如改为转账时，必须提供 from_account_id 与 to_account_id。
-
-允许编辑的业务字段：
-
-- 金额、交易时间、分类、商户、备注；
-- 交易类型（可编辑为收入、支出或转账；不得通过手动编辑将普通交易转换为 refund）；
-- 对应账户；
-- 已有退款的occurred_at（记账日期）与affects_spending（是否抵减花销）；refund_kind保留来源识别的商户退款/转账退回语义。
-
-后端必须在一个原子操作内：
-
-1. 校验版本和写权限。
-2. 校验修改后类型与关联关系是否合法。
-3. 处理该交易原有的有效账户影响和资金变动。
-4. 只按差额或新类型规则重新处理当前交易；不自动重算其他交易。
-5. 校验退款字段合法性、资金份额守恒、账户余额与转账规则；不检查原消费退款额度。
-6. 保存后返回新的交易、账户影响与资金分配结果。
-
-差额处理遵循冻结规则：
-
-- 金额增加：按自己的流动资金 → 自己的存款 → 对象存款的顺序扣减。
-- 金额减少：按对象存款 → 自己的存款 → 自己的流动资金的顺序补足资金缺口。
-- 独立退款与支出金额减少是不同操作，退款不按原消费扣款份额逆序恢复。
-- 编辑退款金额或账户时，撤销该退款自身旧影响，再用统一入账规则处理新影响；不追溯消费。资金份额缺口基准在实现前明确。
-- 编辑affects_spending仅更新统计与预算，不产生新的账户流入；重复来源不得覆盖用户编辑。
-- 编辑退款记账日期时同步更新相关月份统计；跨账户记账起始日期时，按applied/historical_only规则原子切换当前交易影响。
-- 如果改为转账，系统不得擅自把存款转换成流动资金。
-
-### 6.5 删除交易
-
-DELETE /api/v1/transactions/{transactionId}
-
-- 仅允许删除当前用户有权编辑的交易。
-- 删除消费不删除独立退款；删除退款仅撤销自身影响。
-- 删除相关交易的正常账务影响，使其不再参与余额和统计计算。
-- 保留来源证据，但清空相关 SourceRecord 的当前交易关联和匹配状态；之后允许重新导入。
-- 响应返回被删除交易 ID 列表及受影响的账户摘要。
-- 若请求删除对象的交易，返回 403 FORBIDDEN。
-- 不提供删除账户、解绑或回收站接口。
-
-## 7. M4：官方账单导入与来源证据
-
-### 7.1 上传官方账单
-
-POST /api/v1/imports
-
-请求使用 multipart/form-data：
-
-- file：微信或支付宝官方导出文件
-- source_account_profile_id：可选；若文件头可唯一匹配已有来源账户档案则自动使用，否则仅在存在多个候选档案时要求用户选择
-- Header：Idempotency-Key
-
-平台由固定的官方文件结构和表头自动识别，不要求用户每次手动选择微信或支付宝。V1 只支持微信和支付宝官方账单文件；截图识别不属于此接口。
-
-响应示例：
-
-~~~json
-{
-  "data": {
-    "batch_id": "import-batch-id",
-    "platform": "wechat",
-    "status": "needs_review",
-    "summary": {
-      "transactions_created": 120,
-      "transactions_linked": 8,
-      "duplicate_sources_ignored": 3,
-      "source_records_needing_review": 1,
-      "manual_transactions_not_found": 1,
-      "reconciliation_items_rechecked": 2,
-      "failed_rows": 0
-    },
-    "coverage": {
-      "from": "2026-02-01T00:00:00+08:00",
-      "to": "2026-04-30T23:59:59+08:00",
-      "export_type": "all_transactions",
-      "declared_record_count": 169,
-      "parsed_record_count": 169,
-      "complete": true
-    },
-    "source_account_profile": {
-      "id": "source-account-profile-id",
-      "platform": "wechat",
-      "display_label": "微信账号"
-    },
-    "review_items": [
-      {"source_record_id": "source-record-id", "reason_code": "AMBIGUOUS_MATCH"}
-    ],
-    "row_errors": [],
-    "reconciliation_items": [
-      {"reconciliation_item_id": "reconciliation-item-id", "transaction_id": "manual-transaction-id", "reason_code": "NO_SOURCE_MATCH_WITHIN_COVERAGE", "status": "pending_confirmation"}
-    ]
-  }
-}
-~~~
-
-状态建议：
-
-- completed：本批次处理已完成，且本批次没有新产生的待处理来源项、核对项或行级错误。此前批次遗留的待处理核对项可以继续存在，不因此在每次重叠导入中重复弹出。
-- needs_review：本批次新产生待处理来源项、新核对项或行级错误，需要用户查看本次结果。
-- failed：文件无法安全解析或批次无法完成；不得报告为成功入账。
-
-`transactions_created`、`transactions_linked` 和 `duplicate_sources_ignored` 是互斥计数。`source_records_needing_review` 统计缺少实际账户映射或其他必要信息的官方来源行（可含退款）；`manual_transactions_not_found` 统计本批次新建的核对项；`reconciliation_items_rechecked` 统计本批次重新检查到的既有核对项，不会生成重复提示。`coverage.complete` 只有在导出类型为全量、起止时间可解析、声明记录数与实际解析行数一致且所有明细行均能解析出必要的来源身份时才能为 true；否则不得生成“未找到来源”的核对项。若文件可读取但完整性条件未通过，仍可返回已解析结果，并设置 `coverage.complete=false`、`coverage.reason_code=IMPORT_COVERAGE_INCOMPLETE`；该原因码是批次结果说明，不表示整个请求必须返回 HTTP 422。平台交易状态为失败/关闭不等于解析失败，必须按官方状态规则处理，不应混入 parser error。
-
-### 7.2 导入处理约束
-
-后端按以下顺序处理：
-
-1. 从固定文件结构自动识别微信或支付宝；读取导出账户元数据、导出时间、起止范围、导出类型与声明记录数。
-2. 校验表头、日期范围、全量导出标记、声明行数和实际解析行数；不完整文件仍可报告解析结果，但不得执行缺失手动交易核对。
-3. 解析每行官方交易单号，按 `(source_account_profile_id, official_transaction_id)` 查找或创建 SourceRecord；商户订单号不作为唯一主键。
-4. 为每条已识别来源保存 SourceObservation。若重叠导出中同一交易的状态不同，保留两次观察，并按导出时间较新的观察更新当前来源状态；旧文件不得覆盖新状态。
-5. 按平台规则识别退款类型、实际到账账户、实际金额及原始时间，独立创建退款；没有原消费不产生行错误。
-6. 匹配已有来源与手动交易；已存在来源不重复入账，匹配到已有手动交易时关联来源，不重复创建交易。
-7. 对新交易调用统一交易处理逻辑；不直接写余额。对起始日前交易保留事实但不改变该账户余额。
-8. 只有完整覆盖范围和来源账户档案/行级渠道映射都明确时，才核对范围内未匹配到官方来源的手动交易。
-9. 按 `(source_account_profile_id, transaction_id)` 查找 ImportReconciliationItem：新项进入本批次提示；已存在项仅更新最近检查批次和检查时间，不重复创建/提示。
-10. 保存来源关联、核对项、处理结果和汇总计数。
-
-重复导入约束：
-
-- 同一幂等请求不能重复执行。
-- 相同文件指纹可识别为已处理批次，避免重复入账。
-- 首选稳定身份为来源账户档案 + 官方交易单号；商户订单号可为空或重复，不作唯一键。
-- 当前真实重叠样本中，微信 60/60、支付宝 83/83 条重叠记录的官方交易单号一致；同一来源状态可随导出时间更新，但不重复创建交易。
-- 不同文件日期范围重叠时，仍按稳定交易单号去重；不能只按文件指纹去重。
-- 仅当平台文件缺失交易单号且无法证明唯一身份时，才进入来源数据错误/待修复流程，不使用金额、日期和商户相同作为静默合并依据。
-- 删除交易后再次导入，允许重新创建交易；历史 SourceRecord 不能永久阻止重导入。
-- 不静默覆盖用户手动修正的重要字段；不确定时保留证据并要求必要的人工处理。
-
-### 7.3 查询导入结果
-
-GET /api/v1/imports/{batchId}
-
-返回批次状态、计数、覆盖范围、待处理来源记录、解析错误摘要、相关交易 ID，以及独立的 reconciliation_items（未匹配手动交易及确认状态）。只能读取当前用户发起的批次。
-
-官方来源记录待处理与手动交易未找到对应来源是两类不同结果，不能共用同一个“未匹配”含义。不建设独立复杂的异常管理中心；需要人工处理时，从本次导入结果进入对应记录即可。
-
-### 7.4 处理无法唯一匹配的来源记录
-
-POST /api/v1/imports/{batchId}/resolutions
-
-关联已有交易：
-
-~~~json
-{
-  "source_record_id": "source-record-id",
-  "action": "link_existing_transaction",
-  "transaction_id": "existing-transaction-id"
-}
-~~~
-
-确认创建新交易：
-
-~~~json
-{
-  "source_record_id": "source-record-id",
-  "action": "create_transaction"
-}
-~~~
-
-- `link_existing_transaction` 只用于“该官方来源行本身就是这笔已有交易”的情况，必须验证交易属于当前用户，且没有与另一个不兼容的来源身份冲突。
-- row_errors记录真实字段解析或校验错误及行号；必要退款字段无效可使用INVALID_REFUND_FIELDS。缺少账户映射进入已有来源待处理，不使用原消费未找到错误。
-- `create_transaction` 只用于可独立建立的普通收入、支出或转账来源，通过统一交易规则创建正式交易；不得绕过资金分配和账户起始日期规则。
-- 退款不提供原消费选择或关联动作；账户映射、必要字段不确定时可以进入通用待处理，明确原因；身份去重不受记账日期编辑影响。
-- 处理成功后更新 SourceRecord 关联与 ImportBatch 计数。
-- 同一来源记录不能因重复提交 resolution 而重复创建交易。
-
-### 7.4.1 处理未匹配手动交易核对项
-
-POST /api/v1/imports/{batchId}/reconciliation-reviews
-
-删除手动交易：
-
-~~~json
-{
-  "reconciliation_item_id": "reconciliation-item-id",
-  "action": "delete_manual_transaction"
-}
-~~~
-
-保留并标记已核对：
-
-~~~json
-{
-  "reconciliation_item_id": "reconciliation-item-id",
-  "action": "keep_manual"
-}
-~~~
-
-- `delete_manual_transaction` 调用标准交易删除用例，并与核对项关闭/删除在同一原子操作中完成；不得只删除一侧。
-- `keep_manual` 将状态设为 `kept_manual`，不修改交易事实、账户余额或资金份额。
-- 后续官方来源若成功匹配到该手动交易，关联来源并将核对项设为 `matched_to_source`。
-- 必须验证核对项、来源档案和交易都属于当前用户；重复请求应幂等。
-- 重叠导入不能为同一来源档案与交易创建第二个核对项或重复提示。
-
-### 7.5 来源账户档案与支付渠道映射
-
-来源账户档案代表导出文件的微信/支付宝账号；行级支付渠道映射代表交易使用的零钱、银行卡、花呗或亲情卡等方式，两者不能混为一个字段。
-
-- 导入时优先自动匹配已有来源档案。支付宝账户头标识可用于档案指纹匹配；微信文件头目前只有昵称，昵称仅作展示/辅助识别，不作为不可变身份 ID。
-- 若只有一个当前用户的同平台档案，可复用该档案；存在多个候选且无法唯一识别时，才要求用户选择。首次导入创建档案，不要求每次导入重新确认。
-- `ImportBatch` 必须保存来源档案 ID、导出账户元数据快照、导出时间、起止时间、导出类型、声明行数、实际解析行数和完整性判定。
-
-### 7.6 行级支付渠道映射
-
-GET /api/v1/source-payment-method-mappings?platform=wechat
-
-PUT /api/v1/source-payment-method-mappings
-
-请求示例：
-
-~~~json
-{
-  "platform": "wechat",
-  "source_payment_method_key": "零钱",
-  "mapping_kind": "managed_account",
-  "account_id": "account-id"
-}
-~~~
-
-信用支付来源示例：
-
-~~~json
-{
-  "platform": "alipay",
-  "source_payment_method_key": "花呗",
-  "mapping_kind": "credit_source"
-}
-~~~
-
-- `managed_account` 必须提供当前用户有权编辑的 `account_id`。
-- `credit_source` 不创建负债账户，也不需要虚构账户 ID。
-- 映射仅帮助解析每行官方文件中的支付渠道，不直接产生交易或资金变动。
-- 支付渠道名称本身不能替代交易语义判断。
-
-## 8. M1：关系绑定
-
-### 8.1 查询绑定状态
-
-GET /api/v1/relationship
-
-响应示例：
-
-~~~json
-{
-  "data": {
-    "status": "bound",
-    "partner": {
-      "display_name": "对方"
-    },
-    "permissions": {
-      "partner_accounts": "read_only",
-      "partner_transactions": "read_only"
-    }
-  }
-}
-~~~
-
-未绑定时返回 status=unbound，不返回对象资金份额。绑定后首页与账户/账单读取接口可使用前述只读权限。
-
-### 8.2 完成绑定
-
-POST /api/v1/relationship/binding
-
-候选请求：
-
-~~~json
-{
-  "binding_token": "opaque-binding-proof"
-}
-~~~
-
-- 服务端必须验证绑定凭据并确认双方身份；客户端不能只提交任意 user ID 就建立关系。
-- 绑定成功后允许查看对方账户和交易；不改变账户持有人、资金归属、历史交易或个人预算。
-- 不提供解绑接口。
-- **待技术/交互方案确认：** 绑定凭据如何生成、传递、过期及验证，当前业务规则没有冻结具体方式；本接口仅定义消费已验证绑定凭据的边界，不能据此直接实现邀请系统。
-
-## 9. 通用错误码
-
-| HTTP 状态 | 错误码 | 场景 |
+| HTTP | code | 含义 |
 |---|---|---|
-| 400 | BAD_REQUEST | 请求结构无法解析 |
-| 401 | UNAUTHENTICATED | 未登录或凭据无效 |
-| 403 | FORBIDDEN | 无权写入对象数据，或无权操作资源 |
-| 404 | RESOURCE_NOT_FOUND | 资源不存在或不应向当前用户暴露 |
-| 409 | RESOURCE_VERSION_CONFLICT | 资源已被其他操作更新 |
-| 422 | INVALID_REFUND_FIELDS | 退款金额、日期、子类型或抵减开关非法 |
-| 409 | INVALID_TRANSACTION_TYPE_CHANGE | 类型变更不满足账户或来源约束 |
-| 409 | FUNDS_ALLOCATION_NOT_POSSIBLE | 按当前资金分配规则无法完成操作；整笔操作失败，不新增透支流程 |
-| 409 | OPENING_STATE_RECALCULATION_CONFLICT | 修改账户起始状态无法安全重建关联资金变动 |
-| 409 | IDEMPOTENCY_KEY_CONFLICT | 相同幂等键被用于不同请求 |
-| 422 | VALIDATION_ERROR | 字段、金额、枚举或日期不合法 |
-| 422 | INVALID_FUND_ALLOCATION | 初始份额不守恒或资金组合不合法 |
-| 422 | INVALID_TRANSFER | 转账账户、方向或流动资金条件不满足 |
-| 422 | INVALID_REFUND_LINK | 原交易不存在、不属于当前用户或不是有效原消费 |
-| 422 | REFUND_REQUIRES_OFFICIAL_SOURCE | 手动创建接口试图创建退款；退款必须来自官方账单导入 |
-| 422 | UNSUPPORTED_SOURCE_FILE | 文件格式或平台不支持 |
-| 422 | SOURCE_PROFILE_SELECTION_REQUIRED | 多个来源账户档案均可能对应当前文件，需要用户选择一次 |
-| 422 | SOURCE_MAPPING_REQUIRED | 当前来源无法按既有映射安全处理 |
-| 500 | INTERNAL_ERROR | 未预期的服务端错误；返回 request_id，不暴露内部堆栈 |
+| 400 | BAD_REQUEST | 请求无法解析 |
+| 401 | UNAUTHENTICATED | 未登录 |
+| 403 | FORBIDDEN | 已知可读但不可写资源 |
+| 404 | RESOURCE_NOT_FOUND | 资源不存在或不可向本人暴露 |
+| 409 | RESOURCE_VERSION_CONFLICT | 资源版本冲突 |
+| 409 | IDEMPOTENCY_KEY_CONFLICT | 同键不同请求 |
+| 409 | FUNDS_ALLOCATION_NOT_POSSIBLE | 新增/撤销/编辑导致份额不足，整笔失败 |
+| 409 | OPENING_STATE_RECALCULATION_CONFLICT | 无法安全重建起始状态 |
+| 422 | VALIDATION_ERROR | 金额、时间、枚举、字段或组合非法 |
+| 422 | REFUND_REQUIRES_OFFICIAL_SOURCE | 手动入口试图创建refund |
+| 422 | UNSUPPORTED_SOURCE_FILE | 无法识别或读取文件 |
 
-错误码不等于新增产品流程。前端只需根据代码展示明确反馈；具体提示样式留在 UI 阶段设计。
+行reason不是HTTP失败：SOURCE_PROFILE_REQUIRED、SOURCE_MAPPING_REQUIRED、ACCOUNT_EVIDENCE_CONFLICT、TRANSFER_ROLE_REQUIRED、POSSIBLE_EXISTING_TRANSACTION、UNSUPPORTED_PAYMENT_METHOD、TRANSFER_FEE_UNSUPPORTED、UNKNOWN_SOURCE_STATE、INVALID_SOURCE_FIELDS、SOURCE_FACT_CONFLICT。行错误/待处理均附行号、证据和allowed_actions。不存在退款原消费错误码。
 
-## 10. 原子性与一致性验收要求
-
-每个会改变账务的请求都必须满足：
-
-1. **原子提交：** Transaction、TransactionAccountEffect、AccountFundMovement与SourceRecord关联要么全部成功，要么全部不生效。
-2. **份额守恒：** 一个账户所有资金份额之和等于该账户当前余额。
-3. **账户影响守恒：** applied 的账户影响金额与关联资金变动金额合计一致；historical_only 不产生资金变动。
-4. **转账守恒：** 两端账户影响金额相等、方向相反；转账只允许流动资金参与，不计收入或消费。
-5. **退款守恒：** 独立退款账户流入与本交易资金份额变动一致；不要求原消费关系，不校验原消费累计退款额度。
-6. **金额修改差额：** 只处理当前交易金额差额，不自动重算其他交易。
-7. **删除与重导：** 消费、退款独立删除；来源证据保留并解除各自当前关联，后续可重导。
-8. **权限边界：** 绑定关系只提供只读查看权；所有写接口服务端校验资源所属用户。
-9. **统计一致性：** 退款按自身记账月份与affects_spending抵减；不计普通收入；内部转账不计消费；预算按个人计算。
-10. **重复请求：** 幂等重试不能重复创建交易或重复执行资金变动。
-11. **导入后核对：** ImportReconciliationItem 不产生账务影响；确认状态更新与原交易分开，不能误删或改写交易。
-
-## 11. 前后端职责映射
-
-| 前端操作 | API 入口 | 后端统一职责 |
-|---|---|---|
-| 首页打开/切换月份 | GET /overview | 汇总资金份额、个人消费指标与预算 |
-| 新增/编辑账户 | POST/PATCH /accounts | 校验账户权限与基本信息 |
-| 设置初始余额与日期 | PUT /accounts/{id}/opening-state | 保证初始份额守恒，重新判断账户影响状态 |
-| 调整资金归属/性质 | POST /accounts/{id}/fund-adjustments | 在同一账户内等额调整份额 |
-| 手动新增账单 | POST /transactions | 统一校验、生成账户影响与资金变动 |
-| 查看/筛选账单 | GET /transactions | 按权限和筛选条件查询交易事实 |
-| 编辑账单 | PATCH /transactions/{id} | 原子处理当前交易的影响与差额 |
-| 删除账单 | DELETE /transactions/{id} | 仅撤销当前交易，解除其来源关联；不级联消费或退款 |
-| 导入微信/支付宝账单 | POST /imports | 解析来源、去重、匹配、调用统一交易逻辑；退款只能从此流程创建 |
-| 处理官方来源歧义 | POST /imports/{id}/resolutions | 处理实际账户与已有同一交易的来源匹配；不提供退款原消费关联动作 |
-| 确认未匹配手动交易 | POST /imports/{id}/reconciliation-reviews | 仅确认已查看，不改变交易账务 |
-| 查看对象账单 | GET /transactions?view=partner | 检查绑定关系并强制只读 |
-| 修改个人预算 | PUT /budgets/{month} | 只修改当前用户预算 |
-
-前端不负责自行推算扣款顺序、拆分资金份额、判断退款应归属哪个月份，或直接修改余额。后端是这些业务规则的唯一执行方。
-
-## 12. 当前不属于本契约的内容
-
-- 登录、注册、验证码、邀请链接生成与认证供应商选择。
-- 物理数据库表、SQL、索引、事务实现与部署技术。
-- 截图上传、OCR、视觉模型与异步识别任务。
-- 信用卡/花呗负债余额管理。
-- 账户删除、解绑、透支、复杂异常中心。
-- UI 页面结构、视觉样式和交互动画。
-
-上述内容没有被本文件偷偷确定；只有在后续阶段确有需要时才设计。
-
-## 13. 待审阅与下一步
-
-### 本版待审阅重点
-
-1. 接口分组是否与 M1–M5 业务模块和五个产品区域对应。
-2. 前端是否能仅依赖这些接口完成账户、账单、首页、预算、绑定与官方导入的核心操作。
-3. 交易创建/编辑/删除与资金变动的原子边界是否足够清楚。
-4. 导入匹配与核对项操作是否符合“尽量自动、必要时处理、不建设复杂异常中心”的要求。
-5. POST /relationship/binding 的绑定凭据获取方式仍未确定，需在关系绑定功能实现前补充规则。
-6. 官方退款以真实到账账户、金额、时间、类型独立入账；缺少原消费不报错。
-7. 修改账户记账起始日期时，若历史交易状态变化，如何安全重建该账户的有效资金变动，需要在相关功能实现前落实原子重算边界。
-8. 退款自身记账日期与账户起始日期决定余额影响；无需原消费的历史份额。退款回补缺口基准须在账务实现前明确。
-
-### 当前状态与后续顺序
-
-本版同步业务规则v2.8：独立退款、可编辑记账日期与抵减开关、来源身份与用户编辑隔离；导入核对项跨批次唯一等其他规则继续有效。
-
-工程模块边界、实施任务与路线图已分别记录在 ENGINEERING_MODULE_BOUNDARIES.md、IMPLEMENTATION_PLAN.md 和 ROADMAP.md。
-
-后续顺序：
-
-1. 最终核对来源账户档案、行级支付渠道映射、覆盖完整性、状态更新和核对项生命周期与逻辑数据模型一致。
-2. 选择首期产品形态、技术栈、数据位置与认证方式。
-3. 设计物理 Schema、约束、索引与迁移。
-4. 从最小可运行垂直切片开始实现，并按 IMPLEMENTATION_PLAN.md 验收。
-
-**说明：** 本文件是候选 API 契约，不代表接口已经部署或代码已经实现。物理数据结构、具体认证方式与技术栈仍待后续阶段决定。
-
+batch、observation、source、profile、mapping、account、existing_transaction逐项校验本人归属和关联；绑定不绕过。所有M3写路径统一校验账户权限、资金非负、份额/effect守恒及版本。技术实现、安全凭据、SQL、事务框架见实施阶段，不在候选契约假设已运行。
