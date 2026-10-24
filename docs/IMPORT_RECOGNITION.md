@@ -82,6 +82,8 @@
 
 **本轮识别机制可行，可以停止退款原消费匹配研究。** 正式开发仍需完成：实际账户映射、52条转账候选解释、统一入账份额缺口基准，以及持久化去重/编辑/删除/重导的真实闭环验收。截图识别仍暂缓。
 
+后续[接入全量审查](IMPORT_INTEGRATION_AUDIT_2026-10-24.md)发现：现行API仍有退款待处理恢复、逐行结果、coverage及删除后重导等缺口，不能把本节“识别可行”理解为“可直接接入现有契约”。新增探针表明实验时间无时区，且保留来源但清空交易后的重导不能恢复；原14项检查不覆盖该恢复路径。完整字段字典、模块交接、清理清单与验收条件以该审查报告列出的当前状态为准，业务规则仍须按原文优先级执行。
+
 ## 6. 参考实现核查
 
 参考BeeCount main@6616066247a8738a42996c496e1b99106820e59f的[微信解析器](https://github.com/TNT-Likely/BeeCount/blob/6616066247a8738a42996c496e1b99106820e59f/lib/services/import/parsers/wechat_parser.dart)、[通用解析器](https://github.com/TNT-Likely/BeeCount/blob/6616066247a8738a42996c496e1b99106820e59f/lib/services/import/parsers/generic_parser.dart)及[导入确认页](https://github.com/TNT-Likely/BeeCount/blob/6616066247a8738a42996c496e1b99106820e59f/lib/pages/data/import_confirm_page.dart)：可参考关键词找表头和预览；检查的导入链路未见专门退款原消费关联。星账保留官方来源身份与原始观察，本次不复制其代码。

@@ -17,7 +17,8 @@
 | [工程模块边界](docs/ENGINEERING_MODULE_BOUNDARIES.md) | 模块职责、依赖方向、账务写入边界 |
 | [实施路线与验收任务](docs/IMPLEMENTATION_PLAN.md) | 设计前置项、开发顺序和验收标准 |
 | [路线图](docs/ROADMAP.md) | 当前状态、待定决策与里程碑 |
-| [文档一致性与返工风险审查](docs/DOCUMENT_CONSISTENCY_AUDIT_2026-10-24.md) | 文档冲突、未决边界、影响范围与建议解决时机 |
+| [当前导入接入审查与字段报告](docs/IMPORT_INTEGRATION_AUDIT_2026-10-24.md) | 按M1–M5审查输入字段、业务处理、API交接、冲突与同步修改范围 |
+| [历史文档一致性审查](docs/DOCUMENT_CONSISTENCY_AUDIT_2026-10-24.md) | v2.7时期历史记录，不作为当前退款规则依据 |
 
 ## 文档优先级
 
@@ -47,3 +48,5 @@
 ## 导入识别机制更新
 
 [独立退款机制与真实样本验证](docs/IMPORT_RECOGNITION.md)：退款不关联原消费；记账日期与是否抵减花销可编辑；原始来源与用户编辑分离。实验结果不代表正式导入已实现。
+
+[当前接入审查](docs/IMPORT_INTEGRATION_AUDIT_2026-10-24.md)已完成：独立退款方向可行，但现行候选契约尚未闭合。16项需补齐/清理事项（6项为对应接入前置）已按M1–M5归属列出；未将待定资金规则或候选DTO写成已实现功能。
