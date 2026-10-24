@@ -592,7 +592,7 @@ POST /api/v1/imports
 - needs_review：本批次新产生待处理来源项、新核对项或行级错误，需要用户查看本次结果。
 - failed：文件无法安全解析或批次无法完成；不得报告为成功入账。
 
-`transactions_created`、`transactions_linked` 和 `duplicate_sources_ignored` 是互斥计数。`source_records_needing_review` 只统计非退款官方来源行的待处理项；`manual_transactions_not_found` 统计本批次新建的核对项；`reconciliation_items_rechecked` 统计本批次重新检查到的既有核对项，不会生成重复提示。`coverage.complete` 只有在导出类型为全量、起止时间可解析、声明记录数与实际解析行数一致且所有明细行均能解析出必要的来源身份时才能为 true；否则不得生成“未找到来源”的核对项。平台交易状态为失败/关闭不等于解析失败，必须按官方状态规则处理，不应混入 parser error。
+`transactions_created`、`transactions_linked` 和 `duplicate_sources_ignored` 是互斥计数。`source_records_needing_review` 只统计非退款官方来源行的待处理项；`manual_transactions_not_found` 统计本批次新建的核对项；`reconciliation_items_rechecked` 统计本批次重新检查到的既有核对项，不会生成重复提示。`coverage.complete` 只有在导出类型为全量、起止时间可解析、声明记录数与实际解析行数一致且所有明细行均能解析出必要的来源身份时才能为 true；否则不得生成“未找到来源”的核对项。若文件可读取但完整性条件未通过，仍可返回已解析结果，并设置 `coverage.complete=false`、`coverage.reason_code=IMPORT_COVERAGE_INCOMPLETE`；该原因码是批次结果说明，不表示整个请求必须返回 HTTP 422。平台交易状态为失败/关闭不等于解析失败，必须按官方状态规则处理，不应混入 parser error。
 
 ### 7.2 导入处理约束
 
