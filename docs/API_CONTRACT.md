@@ -1,18 +1,18 @@
 # 星账｜API 契约
 
-**版本：** v0.1  
+**版本：** v0.2  
 **阶段：** API 契约设计稿  
 **状态：** 候选契约，待审阅  
-**业务基线：** [核心业务规则 v2.5（已冻结）](BUSINESS_RULES_DISCUSSION.md)  
-**数据基线：** [逻辑数据模型 v0.2](LOGICAL_DATA_MODEL.md)  
-**产品基线：** [产品功能地图 v0.1](PRODUCT_FUNCTION_MAP.md)
+**业务基线：** [核心业务规则 v2.6（已冻结）](BUSINESS_RULES_DISCUSSION.md)  
+**数据基线：** [逻辑数据模型 v0.3](LOGICAL_DATA_MODEL.md)  
+**产品基线：** [产品功能地图 v0.2](PRODUCT_FUNCTION_MAP.md)
 
 本文把已冻结的业务规则和逻辑数据模型转换为前后端共同遵守的接口约定。接口路径与 HTTP/JSON 形式是当前建议，不代表已确定技术栈、数据库、部署方式或认证供应商。
 
 ## 0. 契约原则
 
 1. **前端请求业务操作，不直接修改账务底层记录。** 前端不能直接写账户余额或任意写入资金变动。
-2. **后端统一执行账务规则。** 手动记账、官方账单导入、交易编辑与退款都必须经过同一套交易处理规则。
+2. **后端统一执行账务规则。** 手动记账、官方账单导入、交易编辑与退款都必须经过同一套交易处理规则；但手动创建交易只允许收入、支出和转账，退款只能由官方账单导入创建。
 3. **交易事实、账户影响、资金变动分开表达。** 但需要在一次业务操作内原子完成相关更新。
 4. **身份来自已验证的登录上下文。** 写接口不接受客户端传入的 user_id 作为授权依据。
 5. **绑定只扩大读取范围，不扩大写权限。** 对方的账户和交易可以只读查看，不能通过 API 修改。
@@ -385,7 +385,7 @@ POST /api/v1/accounts/{accountId}/fund-adjustments
 - income：收入
 - expense：支出
 - transfer：内部转账
-- refund：真实退款
+- refund：真实退款（仅由官方账单导入流程创建，不属于手动记账可选类型）
 
 内部账务语义 accounting_semantics 用于表达类型无法单独决定的现金影响与统计规则：
 
@@ -429,19 +429,7 @@ POST /api/v1/transactions
 }
 ~~~
 
-真实退款请求示例：
-
-~~~json
-{
-  "type": "refund",
-  "occurred_at": "2026-10-20T12:30:00+08:00",
-  "amount_minor": 5000,
-  "account_id": "account-id",
-  "original_transaction_id": "original-expense-id",
-  "merchant": "退款",
-  "note": ""
-}
-~~~
+`POST /api/v1/transactions` 只接受手动记账类型 income、expense、transfer；提交 type=refund 必须拒绝（错误码 `REFUND_REQUIRES_OFFICIAL_SOURCE`）。refund 仍是正式交易类型，但只能由官方导入流程在来源记录已识别且原消费关系确认后创建。导入退款时，SourceRecord 关联新建的退款 Transaction，而该 Transaction 的 original_transaction_id 指向原消费；不得把退款 SourceRecord 直接关联到原消费本身。
 
 收入请求使用 type=income 和 account_id。信用消费可使用 type=expense、accounting_semantics=credit_purchase 且不提供受管理现金账户；信用还款使用 type=expense、accounting_semantics=credit_repayment 和实际付款账户。客户端不能将信用消费伪造成普通现金支出。
 
@@ -508,9 +496,9 @@ PATCH /api/v1/transactions/{transactionId}
 允许编辑的业务字段：
 
 - 金额、交易时间、分类、商户、备注；
-- 交易类型；
+- 交易类型（可编辑为收入、支出或转账；不得通过手动编辑将普通交易转换为 refund）；
 - 对应账户；
-- 退款原交易关联（仅退款交易）。
+- 退款原交易关联（仅已有官方来源创建的退款交易可修改该关联）。
 
 后端必须在一个原子操作内：
 
@@ -569,11 +557,20 @@ V1 只支持微信和支付宝官方账单文件；截图识别不属于此接�
       "transactions_created": 120,
       "transactions_linked": 8,
       "duplicate_sources_ignored": 3,
-      "needs_review": 1,
+      "source_records_needing_review": 1,
+      "manual_transactions_not_found": 4,
       "failed_rows": 0
+    },
+    "coverage": {
+      "from": "2026-02-01",
+      "to": "2026-04-30",
+      "complete": true
     },
     "review_items": [
       {"source_record_id": "source-record-id", "reason_code": "AMBIGUOUS_MATCH"}
+    ],
+    "reconciliation_items": [
+      {"reconciliation_item_id": "reconciliation-item-id", "transaction_id": "manual-transaction-id", "reason_code": "NO_SOURCE_MATCH_WITHIN_COVERAGE", "status": "pending_confirmation"}
     ]
   }
 }
@@ -581,11 +578,11 @@ V1 只支持微信和支付宝官方账单文件；截图识别不属于此接�
 
 状态建议：
 
-- completed：批次处理完成，没有待用户处理的记录。
-- needs_review：批次已处理，但存在确实无法唯一匹配的记录。
+- completed：批次处理完成，没有待用户处理的来源记录或手动交易核对项。
+- needs_review：批次已处理，但存在待处理来源记录或待用户确认的手动交易核对项。
 - failed：文件无法安全解析或批次无法完成；不得报告为成功入账。
 
-transactions_created、transactions_linked 和 duplicate_sources_ignored 互斥计数。解析失败行、待处理记录不能伪装成已入账交易。
+`transactions_created`、`transactions_linked` 和 `duplicate_sources_ignored` 是互斥计数。`source_records_needing_review` 统计官方文件中的来源行待处理项；`manual_transactions_not_found` 统计完整覆盖范围内未找到对应来源的手动交易，两者不可合并。`coverage.complete` 为 false 或覆盖范围无法确定时，不得生成“未找到来源”的核对项。解析失败行、待处理记录不能伪装成已入账交易。
 
 ### 7.2 导入处理约束
 
@@ -598,7 +595,9 @@ transactions_created、transactions_linked 和 duplicate_sources_ignored 互斥�
 5. 匹配已有手动交易与已知来源。
 6. 对确认的新交易调用统一交易处理逻辑；不直接写余额。
 7. 对交易日期早于账户起始日期的记录保留交易与账户关联，但不影响该账户余额。
-8. 保存来源关联、处理结果和汇总计数。
+8. 对来源行完成匹配/创建后，识别本次导入是否具有可确认的完整覆盖范围及来源账户映射。
+9. 对覆盖范围内应出现在该来源、但未匹配到官方来源的手动交易，创建 ImportReconciliationItem；核对项不产生账务影响。若覆盖范围或账户映射不确定，则跳过“未找到来源”判断。
+10. 保存来源关联、核对项、处理结果和汇总计数。
 
 重复导入约束：
 
@@ -613,9 +612,9 @@ transactions_created、transactions_linked 和 duplicate_sources_ignored 互斥�
 
 GET /api/v1/imports/{batchId}
 
-返回批次状态、计数、必要的待处理来源记录、解析错误摘要和相关交易 ID。只能读取当前用户发起的批次。
+返回批次状态、计数、覆盖范围、待处理来源记录、解析错误摘要、相关交易 ID，以及独立的 reconciliation_items（未匹配手动交易及确认状态）。只能读取当前用户发起的批次。
 
-不建设独立复杂的异常管理中心；需要人工处理时，从本次导入结果进入对应记录即可。
+官方来源记录待处理与手动交易未找到对应来源是两类不同结果，不能共用同一个“未匹配”含义。不建设独立复杂的异常管理中心；需要人工处理时，从本次导入结果进入对应记录即可。
 
 ### 7.4 处理无法唯一匹配的来源记录
 
@@ -640,10 +639,29 @@ POST /api/v1/imports/{batchId}/resolutions
 }
 ~~~
 
-- link_existing_transaction 必须验证该交易属于当前用户，且没有与另一个不兼容的来源身份冲突。
-- create_transaction 使用已解析的来源字段，通过统一交易规则创建正式交易；不得绕过资金分配和账户起始日期规则。
+- `link_existing_transaction` 只用于“该官方来源行本身就是这笔已有交易”的情况，必须验证交易属于当前用户，且没有与另一个不兼容的来源身份冲突。
+- `create_transaction` 只用于可独立建立的普通收入、支出或转账来源，通过统一交易规则创建正式交易；不得绕过资金分配和账户起始日期规则。
+- 对识别为退款但原消费尚未唯一确认的来源行，不能使用 `link_existing_transaction` 把退款来源直接连到原消费。应在实现退款导入前补齐单独的“确认退款原消费并创建来源退款交易”解析动作；该动作必须同时建立 SourceRecord → 退款 Transaction 和退款 Transaction → 原消费两条不同关系。当前版本不冻结该动作的最终请求字段。
 - 处理成功后更新 SourceRecord 关联与 ImportBatch 计数。
 - 同一来源记录不能因重复提交 resolution 而重复创建交易。
+
+### 7.4.1 确认未匹配手动交易
+
+POST /api/v1/imports/{batchId}/reconciliation-reviews
+
+候选请求：
+
+~~~json
+{
+  "reconciliation_item_id": "reconciliation-item-id",
+  "action": "acknowledge_not_found"
+}
+~~~
+
+- 该操作只确认用户已查看“本次完整覆盖范围内未找到对应官方来源”的提示，不修改、删除或覆盖原手动交易。
+- 如用户发现原交易信息错误，仍通过普通账单编辑/删除接口处理。
+- 必须验证核对项、导入批次和交易都属于当前用户；重复确认应幂等。
+- 本动作只处理手动交易未匹配核对项，不用于解析官方退款来源。
 - 不提供静默丢弃真实有效交易的默认操作；若来源状态是失败、关闭或非交易记录，应由解析规则识别，而不是要求用户将其当作正常交易入账。
 
 ### 7.5 来源账户映射
@@ -738,6 +756,7 @@ POST /api/v1/relationship/binding
 | 422 | INVALID_FUND_ALLOCATION | 初始份额不守恒或资金组合不合法 |
 | 422 | INVALID_TRANSFER | 转账账户、方向或流动资金条件不满足 |
 | 422 | INVALID_REFUND_LINK | 原交易不存在、不属于当前用户或不是有效原消费 |
+| 422 | REFUND_REQUIRES_OFFICIAL_SOURCE | 手动创建接口试图创建退款；退款必须来自官方账单导入 |
 | 422 | UNSUPPORTED_SOURCE_FILE | 文件格式或平台不支持 |
 | 422 | SOURCE_MAPPING_REQUIRED | 当前来源无法按既有映射安全处理 |
 | 500 | INTERNAL_ERROR | 未预期的服务端错误；返回 request_id，不暴露内部堆栈 |
@@ -758,6 +777,7 @@ POST /api/v1/relationship/binding
 8. **权限边界：** 绑定关系只提供只读查看权；所有写接口服务端校验资源所属用户。
 9. **统计一致性：** 退款修正原消费月份；内部转账与信用还款不重复计入消费；预算始终按个人计算。
 10. **重复请求：** 幂等重试不能重复创建交易或重复执行资金变动。
+11. **导入后核对：** ImportReconciliationItem 不产生账务影响；确认状态更新与原交易分开，不能误删或改写交易。
 
 ## 11. 前后端职责映射
 
@@ -771,8 +791,9 @@ POST /api/v1/relationship/binding
 | 查看/筛选账单 | GET /transactions | 按权限和筛选条件查询交易事实 |
 | 编辑账单 | PATCH /transactions/{id} | 原子处理当前交易的影响与差额 |
 | 删除账单 | DELETE /transactions/{id} | 删除交易与应级联删除的退款，解除来源关联 |
-| 导入微信/支付宝账单 | POST /imports | 解析来源、去重、匹配、调用统一交易逻辑 |
-| 处理导入中的歧义 | POST /imports/{id}/resolutions | 关联已有交易或按统一规则创建新交易 |
+| 导入微信/支付宝账单 | POST /imports | 解析来源、去重、匹配、调用统一交易逻辑；退款只能从此流程创建 |
+| 处理官方来源行歧义 | POST /imports/{id}/resolutions | 处理来源行与已有交易的匹配或新交易创建；退款原消费关系需单独动作 |
+| 确认未匹配手动交易 | POST /imports/{id}/reconciliation-reviews | 仅确认已查看，不改变交易账务 |
 | 查看对象账单 | GET /transactions?view=partner | 检查绑定关系并强制只读 |
 | 修改个人预算 | PUT /budgets/{month} | 只修改当前用户预算 |
 
@@ -803,13 +824,13 @@ POST /api/v1/relationship/binding
 
 ### 当前状态与后续顺序
 
-已完成本轮静态审阅修正：总览示例算术已校正；交易金额与带符号账户影响的表示已明确；退款金额编辑的处理边界已补充；尚未由既有规则充分定义的退款组合、绑定凭据和起始日期重算问题已列为待决项。
+本版同步业务规则 v2.6：手动记账不创建退款；退款由官方导入创建；导入后未匹配手动交易单独生成核对项并由用户确认。退款来源的人工解析动作、退款到账账户不同和信用消费退款等边界仍需在 M4/相关实现前补齐。
 
 工程模块边界、实施任务与路线图已分别记录在 ENGINEERING_MODULE_BOUNDARIES.md、IMPLEMENTATION_PLAN.md 和 ROADMAP.md。
 
 后续顺序：
 
-1. 确认第 5–7 项待审阅问题中与首批实现有关的决策。
+1. 审阅退款来源未找到原消费时的独立解析动作，以及导入后核对项的状态/确认接口。
 2. 选择首期产品形态、技术栈、数据位置与认证方式。
 3. 设计物理 Schema、约束、索引与迁移。
 4. 从最小可运行垂直切片开始实现，并按 IMPLEMENTATION_PLAN.md 验收。
