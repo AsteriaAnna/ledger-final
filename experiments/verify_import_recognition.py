@@ -420,21 +420,16 @@ def eligible_manual(t, batch, result, profile, explicit_profile=None, wallet_pro
             batch['declared_from'] <= t['when'] <= batch['effective_to'])
 
 
-def reference_pilot_body(payload, patch=False, compare_version=None):
-    """Trial request validation only, not HTTP or a production capability switch.
-    Version behavior must be selected explicitly for a proposed PATCH scenario.
-    """
+def reference_request_body(payload, patch=False):
+    """Reference body validation; HTTP If-Match is separate from JSON."""
     require(type(payload) is dict, 'VALIDATION_ERROR')
     if patch:
-        require(type(compare_version) is bool, 'PILOT_DECISION_REQUIRED')
-        allowed={'version','occurred_at','affects_spending','amount_minor','account_id','category_code','merchant','note'}
-        required={'version'} if compare_version else set()
-        if not compare_version:
-            allowed.remove('version')
+        allowed={'occurred_at','affects_spending','amount_minor','account_id','category_code','merchant','note'}
+        required=set()
     else:
         require(payload.get('type') != 'refund', 'REFUND_REQUIRES_OFFICIAL_SOURCE')
-        allowed={'type','accounting_semantics','amount_minor','occurred_at','account_id','from_account_id','to_account_id','category_code','merchant','note','source_account_profile_id'}
-        required={'type','accounting_semantics','amount_minor','occurred_at'}
+        allowed={'type','amount_minor','occurred_at','account_id','from_account_id','to_account_id','category_code','merchant','note','source_account_profile_id'}
+        required={'type','amount_minor','occurred_at'}
     require(set(payload)<=allowed and required<=set(payload), 'VALIDATION_ERROR')
     r=deepcopy(payload)
     for field in ('amount_minor','version'):
@@ -460,7 +455,7 @@ def reference_pilot_body(payload, patch=False, compare_version=None):
     if not patch:
         kind=r['type']
         require(kind in ('income','expense','transfer'),'VALIDATION_ERROR')
-        require(r['accounting_semantics']==('internal_transfer' if kind=='transfer' else 'ordinary'),'VALIDATION_ERROR')
+        r['accounting_semantics']='internal_transfer' if kind=='transfer' else 'ordinary'
         accounts={'from_account_id','to_account_id'} if kind=='transfer' else {'account_id'}
         forbidden={'account_id'} if kind=='transfer' else {'from_account_id','to_account_id'}
         require(accounts<=set(r) and not forbidden&set(r),'VALIDATION_ERROR')
@@ -639,7 +634,7 @@ def validate(wechat, alipay):
         for d in re.findall(r'\]\(([^)]+)\)',p.read_text()) if ':' not in d and not d.startswith('#')))
     api=(root/'docs/API_CONTRACT.md').read_text()
     examples=[json.loads(s) for s in re.findall(r'```json\n(.*?)\n```',api,re.S)]
-    check('全部API示例JSON合法',bool(examples) and any(x.get('type')=='expense' for x in examples) and any('version' in x and 'affects_spending' in x for x in examples))
+    check('全部API示例JSON合法',bool(examples) and any(x.get('type')=='expense' for x in examples) and any('affects_spending' in x for x in examples))
     for ex in examples:
         if 'occurred_at' in ex:
             check('API时间示例携带偏移:'+str(len(tests)),datetime.fromisoformat(ex['occurred_at']).tzinfo is not None)
@@ -671,19 +666,19 @@ def validate(wechat, alipay):
     rejects('不安全起始重建明确拒绝',lambda:op.opening_state('self','a','2026-01-01',[0,0,0]),'OPENING_STATE_RECALCULATION_CONFLICT')
     check('起始重建失败整体回滚',op.__dict__==snapshot)
     manual_payload=next(x for x in examples if x.get('type')=='expense')
-    command=reference_pilot_body(manual_payload)
+    command=reference_request_body(manual_payload)
     pilot=Ledger();pilot.account('account-a','self',[500000,0,0],opening='2026-10-01')
     pt=pilot.create('self',command['type'],command['amount_minor'],command['occurred_at'],[command['account_id']])
-    check('创建试点示例准确扣款2580分',pilot.accounts['account-a']['shares'][0]==497420 and pilot.transactions[pt]['version']==1)
+    check('创建契约示例准确扣款2580分',pilot.accounts['account-a']['shares'][0]==497420 and pilot.transactions[pt]['version']==1)
     for value in (0,None,'2580',True):
         bad=deepcopy(manual_payload);bad['amount_minor']=value
-        rejects('试点请求严格金额:'+str(value),lambda bad=bad:reference_pilot_body(bad),'VALIDATION_ERROR')
+        rejects('契约请求严格金额:'+str(value),lambda bad=bad:reference_request_body(bad),'VALIDATION_ERROR')
     no_zone=deepcopy(manual_payload);no_zone['occurred_at']='2026-10-20T12:30:00'
-    rejects('公共请求不自动补缺失时区',lambda:reference_pilot_body(no_zone),'VALIDATION_ERROR')
+    rejects('公共请求不自动补缺失时区',lambda:reference_request_body(no_zone),'VALIDATION_ERROR')
     extra=deepcopy(manual_payload);extra['user_id']='other'
-    rejects('创建请求拒绝未声明授权字段',lambda:reference_pilot_body(extra),'VALIDATION_ERROR')
-    bad_transfer=dict(type='transfer',accounting_semantics='internal_transfer',amount_minor=100,occurred_at=manual_payload['occurred_at'],from_account_id='account-a',to_account_id='account-a')
-    rejects('创建请求禁止同账户转账',lambda:reference_pilot_body(bad_transfer),'VALIDATION_ERROR')
+    rejects('创建请求拒绝未声明授权字段',lambda:reference_request_body(extra),'VALIDATION_ERROR')
+    bad_transfer=dict(type='transfer',amount_minor=100,occurred_at=manual_payload['occurred_at'],from_account_id='account-a',to_account_id='account-a')
+    rejects('创建请求禁止同账户转账',lambda:reference_request_body(bad_transfer),'VALIDATION_ERROR')
     pr=pilot.create('self','refund',44,aware('2026-09-27T12:08:36+08:00'),['account-a'],official=True,refund_kind='merchant_refund',affects=True)
     snap=deepcopy(pilot.__dict__)
     pilot.edit('self',pr,1)
@@ -691,14 +686,14 @@ def validate(wechat, alipay):
     pilot.edit('self',pr,1,affects=True)
     check('退款相同值PATCH不产生版本或资金变化',pilot.__dict__==snap)
     pilot.edit('self',pr,1,affects=False)
-    rejects('空改动不绕过所选版本分支检查',lambda:pilot.edit('self',pr,1),'RESOURCE_VERSION_CONFLICT')
-    no_field=reference_pilot_body({'version':2},patch=True,compare_version=True)
-    false_field=reference_pilot_body({'version':2,'affects_spending':False},patch=True,compare_version=True)
+    rejects('空改动不绕过资源版本检查',lambda:pilot.edit('self',pr,1),'RESOURCE_VERSION_CONFLICT')
+    no_field=reference_request_body({},patch=True)
+    false_field=reference_request_body({'affects_spending':False},patch=True)
     check('PATCH省略与显式false分开', 'affects_spending' not in no_field and false_field['affects_spending'] is False)
-    rejects('PATCH null不能冒充省略',lambda:reference_pilot_body({'version':2,'affects_spending':None},patch=True,compare_version=True),'VALIDATION_ERROR')
-    rejects('PATCH源时间只读',lambda:reference_pilot_body({'version':2,'source_occurred_at':'2026-09-01T00:00:00+08:00'},patch=True,compare_version=True),'VALIDATION_ERROR')
+    rejects('PATCH null不能冒充省略',lambda:reference_request_body({'affects_spending':None},patch=True),'VALIDATION_ERROR')
+    rejects('PATCH源时间只读',lambda:reference_request_body({'source_occurred_at':'2026-09-01T00:00:00+08:00'},patch=True),'VALIDATION_ERROR')
     errors=[x for x in examples if 'code' in x]
-    check('试点HTTP错误示例统一顶层code/message',bool(errors) and all(set(x)=={'code','message'} and type(x['code']) is str and type(x['message']) is str for x in errors))
+    check('契约HTTP错误示例统一顶层code/message',bool(errors) and all(set(x)=={'code','message'} and type(x['code']) is str and type(x['message']) is str for x in errors))
     result_led.invariant()
     return tests,outputs
 
@@ -708,10 +703,119 @@ def table(headers,rows):
     return '| '+' | '.join(headers)+' |\n|'+'|'.join(['---']*len(headers))+'|\n'+''.join('| '+' | '.join(clean(v) for v in row)+' |\n' for row in rows)
 
 
+
+def validate_openapi(batches, outputs):
+    """Optional development validation: PyYAML, jsonschema, openapi-spec-validator.
+    These are tooling dependencies, not application runtime components.
+    Synthetic schema witnesses check structure only; validate() checks domain behavior.
+    """
+    import yaml
+    from jsonschema import Draft202012Validator, FormatChecker, ValidationError
+    from referencing import Registry, Resource
+    from referencing.jsonschema import DRAFT202012
+    from openapi_spec_validator import validate as validate_spec
+    root=Path(__file__).resolve().parents[1]
+    spec=yaml.safe_load((root/'openapi.yaml').read_text());validate_spec(spec)
+    registry=Registry().with_resource('urn:ledger:contract',Resource.from_contents(spec,default_specification=DRAFT202012))
+    count=0
+    def valid(schema,value):
+        nonlocal count
+        # Absolute references preserve the OpenAPI component root for nested schema validation.
+        def absolute(x):
+            if isinstance(x,dict):return {k:('urn:ledger:contract'+v if k=='$ref' and v.startswith('#') else absolute(v)) for k,v in x.items()}
+            if isinstance(x,list):return [absolute(v) for v in x]
+            return x
+        Draft202012Validator(absolute(schema),registry=registry,format_checker=FormatChecker()).validate(value);count+=1
+    def sample(schema):
+        if '$ref' in schema:
+            target=spec
+            for k in schema['$ref'][2:].split('/'):target=target[k]
+            return sample(target)
+        if 'const' in schema:return schema['const']
+        if 'enum' in schema:return schema['enum'][0]
+        t=schema.get('type')
+        if t=='object':
+            required=set(schema.get('required',[]))
+            if 'oneOf' in schema:required.update(schema['oneOf'][0].get('required',[]))
+            return {k:sample(v) for k,v in schema.get('properties',{}).items() if k in required}
+        for k in ('oneOf','anyOf'):
+            if k in schema:return sample(schema[k][0])
+        if t=='array':return [sample(schema['items']) for _ in range(schema.get('minItems',0))]
+        if t=='integer':return schema.get('minimum',1)
+        if t=='number':return schema.get('minimum',1)
+        if t=='boolean':return False
+        if t=='null':return None
+        if schema.get('format')=='date-time':return '2026-09-27T12:00:00+08:00'
+        if schema.get('format')=='date':return '2026-09-27'
+        if '(0[1-9]|1[0-2])' in schema.get('pattern',''):return '2026-09'
+        if 'pattern' in schema and '"' in schema['pattern']:return '"1"'
+        return 'example'
+    for name,schema in spec['components']['schemas'].items():
+        Draft202012Validator.check_schema(schema)
+        valid(schema,sample(schema))
+        for branch in schema.get('oneOf',schema.get('anyOf',[])):valid(schema,sample(branch))
+    diagrams='\n'.join(re.findall(r'```mermaid\n(.*?)```',(root/'docs/PRODUCT_FUNCTION_MAP.md').read_text(),re.S))
+    ids=[]
+    for path,item in spec['paths'].items():
+        for method,op in item.items():
+            ids.append(op['operationId']);assert op['operationId'] in diagrams
+            assert op['description'] and op.get('security',spec['security'])
+            if method=='get':assert 'requestBody' not in op
+            for media,body in op.get('requestBody',{}).get('content',{}).items():
+                valid(body['schema'],body.get('example',sample(body['schema'])))
+            for code,response in op['responses'].items():
+                if '$ref' in response:response=spec['components']['responses'][response['$ref'].split('/')[-1]]
+                for media,body in response.get('content',{}).items():
+                    valid(body['schema'],body.get('example',sample(body['schema'])))
+    assert len(ids)==len(set(ids))==24
+    schemas=spec['components']['schemas']
+    manual={'type':'expense','account_id':'a','amount_minor':4079,'occurred_at':'2026-09-27T12:00:00+08:00'}
+    valid(schemas['ManualCreate'],manual)
+    invalid=[{**manual,'amount_minor':v} for v in (True,0,-1,'4079')]
+    invalid += [{**manual,'accounting_semantics':'ordinary'},{**manual,'user_id':'other'},{**manual,'occurred_at':'2026-09-27T12:00:00'},{**manual,'type':'refund'},{**manual,'from_account_id':'b'}]
+    for value in invalid:
+        try:valid(schemas['ManualCreate'],value)
+        except ValidationError:count+=1
+        else:raise AssertionError(('schema accepted illegal create',value))
+    for value in ({'version':1},{'affects_spending':None},{'source_occurred_at':manual['occurred_at']}):
+        try:valid(schemas['TransactionPatch'],value)
+        except ValidationError:count+=1
+        else:raise AssertionError(('schema accepted illegal patch',value))
+    valid(schemas['TransactionPatch'],{'affects_spending':False})
+    assert schemas['ImportRow']['properties']['disposition']['enum']==list(DISPOSITIONS) or set(schemas['ImportRow']['properties']['disposition']['enum'])==set(DISPOSITIONS)
+    real_rows=0;posted=0
+    for batch,output in zip(batches,outputs):
+        for row in output['rows']:
+            evidence={k:row.get(v) for k,v in dict(source_kind='source_kind',source_status='source_status',source_direction='source_direction',account_evidence='raw_method',merchant_order_id='merchant_order_id').items()}
+            evidence.update(discount_tags=row.get('discount_tags',[]),raw_fields=row['raw_fields'],canonical_method_keys=row['keys'])
+            valid(schemas['Evidence'],evidence);real_rows+=1
+            candidate={k:None for k in schemas['Candidate']['required']}
+            candidate.update({k:row.get(k) for k in ('type','accounting_semantics','amount_minor','refund_kind','affects_spending')})
+            candidate.update(category_code=row['category_code'],merchant=row['counterparty'],note=row['description'],source_occurred_at=row['source_occurred_at'].isoformat(),occurred_at=row['occurred_at'].isoformat())
+            if row['type']=='transfer':
+                for i,side in enumerate(('from','to')):
+                    if len(row['keys'])>i:candidate[side+'_canonical_method_key']=row['keys'][i]
+                    if len(row['accounts'])>i:candidate[side+'_account_id']=row['accounts'][i]
+            elif row['type']:
+                if row['keys']:candidate['canonical_method_key']=row['keys'][0]
+                if row['accounts']:candidate['account_id']=row['accounts'][0]
+            valid(schemas['Candidate'],candidate)
+            if row['disposition']!='created':continue
+            transaction=dict(id='reference-'+str(posted),type=row['type'],accounting_semantics=row['accounting_semantics'],amount_minor=row['amount_minor'],occurred_at=row['occurred_at'].isoformat(),category_code=row['category_code'],merchant=row['counterparty'],note=row['description'],source_account_profile_id='p-'+row['platform'],source_summaries=[dict(source_record_id='reference-source-'+str(posted),platform=row['platform'],source_occurred_at=row['source_occurred_at'].isoformat())],version=1,read_only=False)
+            if row['type']=='transfer':transaction.update(from_account_id=row['accounts'][0],to_account_id=row['accounts'][1])
+            else:transaction['account_id']=row['accounts'][0]
+            if row['type']=='refund':transaction.update(refund_kind=row['refund_kind'],affects_spending=row['affects_spending'])
+            valid(schemas['Transaction'],transaction);posted+=1
+    return dict(openapi_operations=len(ids),schema_examples_and_negative_checks=count,mermaid_covered=len(ids),real_evidence_rows=real_rows,reference_transaction_projections=posted)
+
+
+
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--wechat',required=True);parser.add_argument('--alipay',required=True);parser.add_argument('--report');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--wechat',required=True);parser.add_argument('--alipay',required=True);parser.add_argument('--report');parser.add_argument('--validate-openapi',action='store_true');args=parser.parse_args()
     wx=parse_file(args.wechat);ali=parse_file(args.alipay);require(wx['platform']=='wechat' and ali['platform']=='alipay','UNSUPPORTED_SOURCE_FILE')
     tests,outputs=validate(wx,ali)
+    if args.validate_openapi:
+        print(validate_openapi((wx,ali),outputs))
     print({'checks_passed':len(tests),'read_rows':len(wx['rows'])+len(ali['rows']), 'reference_results':[o['summary'] for o in outputs]})
     if args.report:
         text='# 星账核心设计与流程验证\n\n仅为文档配套的内存参考模型，不是已部署API/数据库/真实用户账户验收。当前验证使用固定时钟及虚构账户映射；原始文件只读，无外部写账。\n\n'

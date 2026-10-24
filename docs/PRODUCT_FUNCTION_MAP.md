@@ -43,3 +43,80 @@
 解析失败分支仅保存证据和错误，不进入M3；成功分支调用统一M3保存。补映射后的官方refund可在现有导入结果继续创建；不新增手动退款入口、异常管理中心或独立退款模块。
 
 截图分享/识别不开发；本期不支持的亲情卡、花呗、费用转账明确展示。页面不能直接改余额或自己实现资金计算。
+
+## 完整API调用流程
+
+以下是计划实现的客户端调用，不代表已有HTTP程序。每个框内使用契约operationId，完整参数和失败行为只在API契约维护。认证SDK负责登录/刷新/退出；401回到认证，恢复身份后使用原幂等键确认未知写入结果。成功写入后重新读取受影响详情、列表和总览；不得通过GET顺便入账。
+
+### M1 身份与关系
+
+```mermaid
+flowchart TB
+  Auth["认证SDK取得会话"] --> getRelationship["getRelationship：查看绑定状态"]
+  getRelationship -->|未绑定，发起邀请| createBindingInvitation["createBindingInvitation：生成凭据"]
+  getRelationship -->|接收有效凭据| bindRelationship["bindRelationship：确认绑定"]
+  createBindingInvitation --> Copy["用户自行交给对方"]
+  bindRelationship --> getRelationship
+  getRelationship -->|已绑定| Read["对象账户与账单只读入口"]
+```
+
+### M2 账户与资金
+
+```mermaid
+flowchart TB
+  listAccounts["listAccounts：列表和账户选择"] --> getAccount["getAccount：详情及当前版本"]
+  listAccounts --> createAccount["createAccount：设置账户及初始状态"]
+  getAccount --> patchAccount["patchAccount：修改账户资料"]
+  getAccount --> putOpeningState["putOpeningState：修正初始状态"]
+  getAccount --> adjustFunds["adjustFunds：同账户份额调整"]
+  patchAccount --> Refresh["重新读取账户与总览"]
+  putOpeningState --> Refresh
+  adjustFunds --> Refresh
+  createAccount --> listAccounts
+```
+
+### M3 账单生命周期
+
+```mermaid
+flowchart TB
+  listTransactions["listTransactions：筛选账单"] --> getTransaction["getTransaction：详情及当前版本"]
+  listCategories["listCategories：读取分类字典"] --> Form["手动记账或编辑表单"]
+  Form --> createTransaction["createTransaction：普通收支或内部转账"]
+  getTransaction --> Form
+  Form --> patchTransaction["patchTransaction：保存编辑含退款"]
+  getTransaction --> deleteTransaction["deleteTransaction：安全撤销"]
+  createTransaction --> Refresh["刷新账单、账户及受影响月份"]
+  patchTransaction --> Refresh
+  deleteTransaction --> Refresh
+```
+
+### M4 官方导入与恢复
+
+```mermaid
+flowchart TB
+  uploadImport["uploadImport：读取文件并处理可执行行"] --> getImport["getImport：阶段、原文、候选及结果"]
+  getImport -->|档案或角色未定、同事件待确认| resolveImport["resolveImport：选择后继续"]
+  getImport -->|缺少渠道映射| listMappings["listMappings：查询本档案映射"]
+  listMappings --> Account["复用账户列表或新建账户"]
+  Account --> putMapping["putMapping：确认渠道账户"]
+  putMapping -->|客户端自动提交resume| resolveImport
+  resolveImport --> getImport
+  getImport -->|具备缺失核对资格| reviewReconciliation["reviewReconciliation：保留或安全删除"]
+  reviewReconciliation --> getImport
+  getImport -->|不支持或无法安全处理| Evidence["保留原因及证据；不造账"]
+```
+
+### M5 首页与预算
+
+```mermaid
+flowchart TB
+  getOverview["getOverview：当前资金和所选月统计"] --> getBudget["getBudget：读取预算及版本"]
+  getBudget --> putBudget["putBudget：保存该月预算"]
+  putBudget --> getOverview
+  Month["切换当前或过去月份"] --> getOverview
+  Future["设置未来预算"] --> getBudget
+```
+
+任何写操作失败：字段错误留在表单；412或版本409先刷新相应资源再由用户重做；资金不足/撤销不安全409保留原账并解释原因；超时不能当失败重新用新键提交。导入行失败通过同一个结果页查看原因，补条件后继续。对象视图隐藏写按钮，服务端仍检查权限。
+
+所有24个operationId均在以上图中出现；列表分页、两个导入明细游标、筛选重置和预算未设置的空值边界见API契约，不另加分页或刷新接口。来源档案通过导入选择/创建，不另建档案管理模块。

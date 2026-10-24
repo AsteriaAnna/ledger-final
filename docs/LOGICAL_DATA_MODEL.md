@@ -7,6 +7,7 @@
 | 实体 | 所属 | 必要概念与约束 |
 |---|---|---|
 | User | M1 | 内部ID、认证主体、显示名称；身份服务端验证 |
+| BindingInvitation | M1 | 发起人、不可预测凭据、到期时间、消费状态；本人仅一个有效未消费邀请；不保存明文到日志 |
 | RelationshipBinding | M1 | 双方用户、有效状态/时间；仅扩大明确读权限 |
 | Account | M2 | holder_user_id、custodian_user_id、name、account_type、opening_date、version；实际账户；不另存可写余额 |
 | Transaction | M3 | owner、type、accounting_semantics、amount_minor、occurred_at、category_code、merchant、note、可选source_account_profile_id、refund_kind、affects_spending、version |
@@ -14,10 +15,10 @@
 | AccountFundMovement | M2/M3 | account、fund_owner、fund_type、signed_amount_minor、reason、operation_group、可选effect、effective_at |
 | SourceAccountProfile | M4 | owner、platform、label、可选账号指纹、metadata；昵称不作唯一身份 |
 | SourcePaymentMethodMapping | M4 | owner、profile、canonical_method_key、account_id、version；unique(profile,key) |
-| ImportBatch | M4 | owner、文件指纹、导出时间、声明范围/类型/行数、实读数、profile可空、status、version、汇总 |
-| SourceRecord | M4 | profile、official_transaction_id、当前规范化来源事实、当前transaction可空、当前观察指针；unique(profile,official_transaction_id) |
+| ImportBatch | M4 | owner、文件指纹、导出时间、声明范围/类型/行数、实读数、profile可空、status、profile_version、汇总 |
+| SourceRecord | M4 | profile、official_transaction_id、当前规范化来源事实、当前transaction可空、当前观察指针、version；unique(profile,official_transaction_id) |
 | SourceObservation | M4 | batch、source可空、行号、完整raw_fields、原始时间/状态/金额/渠道、导出时间、内容指纹 |
-| ImportReconciliationItem | M4 | profile、manual_transaction、first/last_batch、status；unique(profile,transaction) |
+| ImportReconciliationItem | M4 | profile、manual_transaction、first/last_batch、status、version；unique(profile,transaction) |
 | MonthlyBudget | M5 | owner、month、amount_minor、version；unique(owner,month) |
 
 行处理结果放在batch/observation的处理字段或派生视图，不新建工作流实体。用户确认的转账角色与关联决定保存在来源处理字段，不混入raw_fields，不随重导重置；官方重要事实变化时重新校验。观察在档案未定时只关联batch，档案确定后再关联SourceRecord。一来源最多关联一笔有效交易，一交易可有多条来源。
@@ -40,11 +41,11 @@ Transaction.source_account_profile_id用于手动明确声明来源或官方创�
 
 ## 4. 编辑删除和原子性
 
-合法空改动不新增版本或资金变动；权限、字段及已选择的版本条件仍先校验。支出金额差额遵循业务扣减/回补；收入、退款改金额/账户先撤销自身旧计划再生成新计划。仅改抵减不动资金；仅改日期且历史/有效状态不变时保留份额计划、改生效日期。跨起始日撤销/生成当前effect，转账两端分别处理，不重算其他交易。
+合法空改动不新增版本或资金变动；权限、字段及目标资源版本条件仍先校验。支出金额差额遵循业务扣减/回补；收入、退款改金额/账户先撤销自身旧计划再生成新计划。仅改抵减不动资金；仅改日期且历史/有效状态不变时保留份额计划、改生效日期。跨起始日撤销/生成当前effect，转账两端分别处理，不重算其他交易。
 
 任何修改、删除使当前份额负值则整笔拒绝。删除仅撤销本交易、effects和movements；清空相关SourceRecord当前关联，保留来源观察，消费与退款互不级联。
 
-M3保存交易、effects、movements与M4来源关联必须在同一Unit of Work提交。失败不得留下半笔账务、单边转账或悬空当前关联。version条件比较是否采用见实施计划D3；来源身份唯一和资金守恒始终是业务约束，不因未选择请求重试保护而取消。
+M3保存交易、effects、movements与M4来源关联必须在同一Unit of Work提交。失败不得留下半笔账务、单边转账或悬空当前关联。version条件比较按API执行；来源身份唯一和资金守恒始终是业务约束。
 
 ## 5. 来源生命周期
 
@@ -58,7 +59,7 @@ M3保存交易、effects、movements与M4来源关联必须在同一Unit of Work
 | 无交易，失败/关闭变有效 | 重新评估，不按来源存在跳过 |
 | 已入账后官方重要金额/方向/类型/有效性变动 | 待处理差异，不静默改账 |
 
-同文件只复用解析，不封锁新操作。若选择请求幂等，键重试只重放原请求结果。存活交易的重复来源与已删除交易的恢复必须分开判断。
+同文件只复用解析，不封锁新操作。24小时内同幂等键重试只重放原请求结果。存活交易的重复来源与已删除交易的恢复必须分开判断。
 
 ## 6. 完整性、结果和核对
 
@@ -75,3 +76,9 @@ V1任一行unsupported、needs_review或failed则该batch不自动生成缺失�
 实体有直接owner或可追溯归属。一次操作验证batch、source、profile、mapping、account、transaction的本人权限与相互关系。对象只读账单不返回raw_fields、对方账号或文件。
 
 M5按已保存expense减启用抵减的refund，余额来自有效movements。历史交易可参与消费但不影响余额。Category仅受控字典/other，不增加用户分类管理模块；没有费用转账、负债、跨个人账本写入模型。
+
+## 8. 对外版本与字段投影
+
+Account和Transaction用If-Match强ETag比较版本，缺失428、过期412。SourceRecord、核对项、渠道映射、预算分别比较自己的版本；映射和预算用expected_version=0表达新建。ImportBatch.profile_version仅保护首次确定档案，逐行恢复不争用整批版本。合法空改动不增版本；所有实际资金变化仍受单库原生并发控制保护。
+
+API账户类型命名account_type；accounting_semantics仅响应/内部命令派生，客户端不写。读取Account包含opening_state及当前资金；Transaction按四种类型返回封闭结构。公开字段是实体投影，不要求为每个响应新建实体。幂等请求记录是单库技术状态，不是新业务域或历史账务真相。

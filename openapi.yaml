@@ -1,0 +1,2884 @@
+openapi: 3.1.0
+info:
+  title: 星账 V1 公开API契约
+  version: 1.0.0
+  description: '设计契约，未部署。24个公开操作覆盖M1–M5；认证签发/刷新/退出由外部认证服务承担。原生单库事务/必要POST幂等/资源级版本比较作为选定边界；不引入Redis/MQ/分布式锁。
+
+    导入Evidence返回canonical_method_keys；Candidate按单账户或转账两端分别返回规范渠道键，客户端原样提交映射，不重复解析名称。ImportBatch.source_metadata保存本人可读的原始头元数据。'
+servers:
+- url: /api/v1
+  description: 相对业务前缀，不代表生产地址
+security:
+- bearerAuth: []
+tags:
+- name: M1
+- name: M2
+- name: M3
+- name: M4
+- name: M5
+paths:
+  /relationship:
+    get:
+      operationId: getRelationship
+      tags:
+      - M1
+      summary: 查询绑定状态
+      description: '使用环节：登录后进入我的/决定对象查看入口。
+
+        成功/副作用：只返回本人当前关系与必要对象信息；不创建邀请或关系。
+
+        异常/边界：未绑定partner=null、权限none；不返回邀请凭据。'
+      parameters: []
+      responses:
+        '200':
+          description: 只读结果；无业务数据库修改。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Relationship'
+                required:
+                - data
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /relationship/invitations:
+    post:
+      operationId: createBindingInvitation
+      tags:
+      - M1
+      summary: 生成绑定凭据
+      description: '使用环节：未绑定用户发起关系绑定。
+
+        成功/副作用：创建本人10分钟有效、一次性邀请；新意图使本人旧的未消费邀请失效；发起邀请表达绑定意愿。
+
+        异常/边界：已绑定409 RELATIONSHIP_CONFLICT；旧键只重放原token及原到期时间，不延期；凭据只经本人主动复制交给对方，不自动发送。'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/BindingInvitation'
+                required:
+                - data
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: {}
+              required: []
+              additionalProperties: false
+            example: {}
+  /relationship/binding:
+    post:
+      operationId: bindRelationship
+      tags:
+      - M1
+      summary: 确认并完成绑定
+      description: '使用环节：接收方输入对方凭据并确认。
+
+        成功/副作用：验证双方均未绑定、凭据非本人且有效，一次消费凭据并建立关系；不改变钱归属或历史账务。
+
+        异常/边界：过期/无效/本人凭据422 BINDING_INVITATION_INVALID；与其他人已绑定409；同一双方已成功的重试返回当前绑定，不再创建第二关系。'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Relationship'
+                required:
+                - data
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BindRequest'
+            example:
+              binding_token: opaque-invitation
+  /accounts:
+    get:
+      operationId: listAccounts
+      tags:
+      - M2
+      summary: 查询账户列表
+      description: '使用环节：账户页、记账选账户、导入映射。
+
+        成功/副作用：只读当前余额/份额与初始状态；对象账户read_only=true。
+
+        异常/边界：空列表data=[]；不可用partner视图403；游标与本人/对象范围绑定。'
+      parameters:
+      - &id002
+        $ref: '#/components/parameters/View'
+      - &id003
+        $ref: '#/components/parameters/Limit'
+      - &id004
+        $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: 只读结果；无业务数据库修改。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Account'
+                  page:
+                    type: object
+                    properties:
+                      next_cursor:
+                        anyOf:
+                        - &id006
+                          type: string
+                        - type: 'null'
+                    required:
+                    - next_cursor
+                    additionalProperties: false
+                required:
+                - data
+                - page
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+    post:
+      operationId: createAccount
+      tags:
+      - M2
+      summary: 创建实际账户
+      description: '使用环节：首次使用或新增银行卡/钱包。
+
+        成功/副作用：创建本人账户与初始分配，金额合计一致，不计收入；缺省custodian=self。
+
+        异常/边界：起始日未来/份额重复/合计不等422；partner份额仅绑定后savings；账户名称不作为去重键。'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Account'
+                required:
+                - data
+                additionalProperties: false
+          headers:
+            ETag:
+              description: 目标资源当前强ETag。
+              schema:
+                type: string
+                pattern: ^"[1-9][0-9]*"$
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountCreate'
+            example:
+              name: 钱包
+              account_type: wechat_balance
+              opening_state:
+                opening_date: '2026-08-01'
+                opening_balance_minor: 500000
+                opening_allocations:
+                - fund_owner: self
+                  fund_type: liquid
+                  amount_minor: 500000
+  /accounts/{accountId}:
+    get:
+      operationId: getAccount
+      tags:
+      - M2
+      summary: 查询单个账户
+      description: '使用环节：查看账户或打开编辑表单。
+
+        成功/副作用：返回当前计算份额和完整opening_state，供现有编辑表单使用。
+
+        异常/边界：不存在/不可见404；对象可读不可写，不反向赋予资金所有人写权限。'
+      parameters:
+      - name: accountId
+        in: path
+        required: true
+        schema: &id001
+          type: string
+          minLength: 1
+      responses:
+        '200':
+          description: 只读结果；无业务数据库修改。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Account'
+                required:
+                - data
+                additionalProperties: false
+          headers:
+            ETag:
+              description: 目标资源当前强ETag。
+              schema:
+                type: string
+                pattern: ^"[1-9][0-9]*"$
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+    patch:
+      operationId: patchAccount
+      tags:
+      - M2
+      summary: 编辑账户基本信息
+      description: '使用环节：账户页改名或保管关系。
+
+        成功/副作用：只更新name/account_type/custodian，合法无变化保持version。
+
+        异常/边界：禁止余额、holder、fund_shares、opening_state字段；不能把已映射钱包改成不兼容类型；未绑定不能custodian=partner；过期412。'
+      parameters:
+      - name: accountId
+        in: path
+        required: true
+        schema: *id001
+      - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Account'
+                required:
+                - data
+                additionalProperties: false
+          headers:
+            ETag:
+              description: 目标资源当前强ETag。
+              schema:
+                type: string
+                pattern: ^"[1-9][0-9]*"$
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '412':
+          $ref: '#/components/responses/Error412'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '428':
+          $ref: '#/components/responses/Error428'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AccountPatch'
+            example:
+              name: 我的钱包
+  /accounts/{accountId}/opening-state:
+    put:
+      operationId: putOpeningState
+      tags:
+      - M2
+      summary: 修正初始状态
+      description: '使用环节：发现初始金额或日期填错。
+
+        成功/副作用：整体替换初始状态、重建本账户受影响资金与历史/有效状态，其他账户和交易事实不改。
+
+        异常/边界：不能安全重建409 OPENING_STATE_RECALCULATION_CONFLICT并全部不生效；空改动version不变，不提供直接覆盖当前余额。'
+      parameters:
+      - name: accountId
+        in: path
+        required: true
+        schema: *id001
+      - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Account'
+                required:
+                - data
+                additionalProperties: false
+          headers:
+            ETag:
+              description: 目标资源当前强ETag。
+              schema:
+                type: string
+                pattern: ^"[1-9][0-9]*"$
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '412':
+          $ref: '#/components/responses/Error412'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '428':
+          $ref: '#/components/responses/Error428'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpeningState'
+            example:
+              opening_date: '2026-08-01'
+              opening_balance_minor: 500000
+              opening_allocations:
+              - fund_owner: self
+                fund_type: liquid
+                amount_minor: 500000
+  /accounts/{accountId}/fund-adjustments:
+    post:
+      operationId: adjustFunds
+      tags:
+      - M2
+      summary: 调整账户内资金份额
+      description: '使用环节：把存款转流动或调整资金归属。
+
+        成功/副作用：同账户等额调整当前份额和存款基准，余额不变，不记消费/收入；账户version递增。
+
+        异常/边界：from=to/非法份额422；来源不足409；对象账户不可写，不能把对象流动分配到本人账户。'
+      parameters:
+      - name: accountId
+        in: path
+        required: true
+        schema: *id001
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Account'
+                required:
+                - data
+                additionalProperties: false
+          headers:
+            ETag:
+              description: 目标资源当前强ETag。
+              schema:
+                type: string
+                pattern: ^"[1-9][0-9]*"$
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '412':
+          $ref: '#/components/responses/Error412'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '428':
+          $ref: '#/components/responses/Error428'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FundAdjustment'
+            example:
+              from:
+                fund_owner: self
+                fund_type: liquid
+              to:
+                fund_owner: self
+                fund_type: savings
+              amount_minor: 10000
+  /transactions:
+    get:
+      operationId: listTransactions
+      tags:
+      - M3
+      summary: 查询账单列表
+      description: '使用环节：账单页筛选/搜索或确认超时结果。
+
+        成功/副作用：只读保存事实，含historical_only账单；不标已核对、不写账。
+
+        异常/边界：from/to北京时间包含边界且from<=to；空列表[]；分页按occurred_at倒序与id确定次序；对象不返回来源证据数组。'
+      parameters:
+      - *id002
+      - *id003
+      - *id004
+      - name: from
+        in: query
+        required: false
+        schema: &id005
+          type: string
+          format: date
+      - name: to
+        in: query
+        required: false
+        schema: *id005
+      - name: type
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - income
+          - expense
+          - transfer
+          - refund
+      - name: account_id
+        in: query
+        required: false
+        schema: *id001
+      - name: category_code
+        in: query
+        required: false
+        schema: &id029
+          type: string
+          enum: &id015
+          - food
+          - shopping
+          - transport
+          - education
+          - health
+          - entertainment
+          - utilities
+          - other
+      - name: q
+        in: query
+        required: false
+        schema: *id006
+      responses:
+        '200':
+          description: 只读结果；无业务数据库修改。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Transaction'
+                  page:
+                    type: object
+                    properties:
+                      next_cursor:
+                        anyOf:
+                        - *id006
+                        - type: 'null'
+                    required:
+                    - next_cursor
+                    additionalProperties: false
+                required:
+                - data
+                - page
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+    post:
+      operationId: createTransaction
+      tags:
+      - M3
+      summary: 手动创建交易
+      description: '使用环节：手动记账提交。
+
+        成功/副作用：统一M3创建income/expense/无费transfer；semantics按type派生，不让客户端选；有效端改变资金，历史端只保存事实；更新相关月份统计。
+
+        异常/边界：禁止refund和客户端accounting_semantics/user_id/余额/源证据；未来时间/同账户转账422；金额/份额不足整笔409；转账两端无单边成功；不同键代表新意图。'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Mutation'
+                required:
+                - data
+                additionalProperties: false
+          headers:
+            ETag:
+              description: 目标资源当前强ETag。
+              schema:
+                type: string
+                pattern: ^"[1-9][0-9]*"$
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManualCreate'
+            example:
+              type: expense
+              account_id: account-a
+              amount_minor: 2580
+              occurred_at: '2026-10-20T12:30:00+08:00'
+              category_code: other
+              merchant: 午餐
+              note: ''
+  /transactions/{transactionId}:
+    get:
+      operationId: getTransaction
+      tags:
+      - M3
+      summary: 查询单笔账单
+      description: '使用环节：详情、编辑前读取或确认编辑结果。
+
+        成功/副作用：返回当前事实/版本及本人允许的来源摘要；不恢复已删除交易。
+
+        异常/边界：删除后404；对象read_only=true、source_summaries=[]。'
+      parameters:
+      - name: transactionId
+        in: path
+        required: true
+        schema: *id001
+      responses:
+        '200':
+          description: 只读结果；无业务数据库修改。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Transaction'
+                required:
+                - data
+                additionalProperties: false
+          headers:
+            ETag:
+              description: 目标资源当前强ETag。
+              schema:
+                type: string
+                pattern: ^"[1-9][0-9]*"$
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+    patch:
+      operationId: patchTransaction
+      tags:
+      - M3
+      summary: 编辑已有账单含退款
+      description: '使用环节：账单页编辑保存。
+
+        成功/副作用：省略字段保持；普通类型可在income/expense/transfer间变，refund保持类型/子类型；仅抵减不动资金，仅日期不跨起始日保留份额计划；返回受影响月份。
+
+        异常/边界：空对象/相同值不增版本但仍比较If-Match；null仅允许清空手动声明source_account_profile_id，其他字段不接受null；refund不能改type/子类型/源时间；普通交易不能改refund；撤销不安全409并保留全部原值；跨起始日会改变有效余额；不重算后续全部份额。'
+      parameters:
+      - name: transactionId
+        in: path
+        required: true
+        schema: *id001
+      - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Mutation'
+                required:
+                - data
+                additionalProperties: false
+          headers:
+            ETag:
+              description: 目标资源当前强ETag。
+              schema:
+                type: string
+                pattern: ^"[1-9][0-9]*"$
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '412':
+          $ref: '#/components/responses/Error412'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '428':
+          $ref: '#/components/responses/Error428'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionPatch'
+            example:
+              occurred_at: '2026-08-15T12:00:00+08:00'
+              affects_spending: false
+    delete:
+      operationId: deleteTransaction
+      tags:
+      - M3
+      summary: 删除当前账单
+      description: '使用环节：账单详情删除。
+
+        成功/副作用：仅撤销本交易，解除其来源当前关联但保留观察；消费不级联独立退款。
+
+        异常/边界：不能安全撤销409，全部不删；不存在/已删除404；再次DELETE不会重复扣改资金；恢复由新导入操作完成，不建回收站。'
+      parameters:
+      - name: transactionId
+        in: path
+        required: true
+        schema: *id001
+      - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DeleteResult'
+                required:
+                - data
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '412':
+          $ref: '#/components/responses/Error412'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '428':
+          $ref: '#/components/responses/Error428'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /transaction-categories:
+    get:
+      operationId: listCategories
+      tags:
+      - M3
+      summary: 查询受控分类字典
+      description: '使用环节：手动记账/编辑分类选择。
+
+        成功/副作用：只读字典；other兜底，分类不决定资金方向。
+
+        异常/边界：不提供用户分类管理接口，不调用AI。'
+      parameters: []
+      responses:
+        '200':
+          description: 只读结果；无业务数据库修改。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Category'
+                required:
+                - data
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /imports:
+    post:
+      operationId: uploadImport
+      tags:
+      - M4
+      summary: 导入官方XLSX
+      description: '使用环节：选择官方账单文件。
+
+        成功/副作用：创建本人batch与观察，自动解析/规范化；档案明确时处理可入账行，逐行调用统一M3；不支持和待处理行不写账；同步返回当前分页结果与全批汇总。
+
+        异常/边界：仅XLSX，文件<=10MiB且明细<=10000行；无法判型/读取422，超额413且不写账；可读但声明数不符仍展示行、禁止缺失核对；无档案也返回batch及候选。部分行失败不回滚已完成其他行；同键重试重放原批次，新键重导重检当前来源关联；不虚构202后台任务。'
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '413':
+          $ref: '#/components/responses/Error413'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                source_account_profile_id: *id001
+              required:
+              - file
+              additionalProperties: false
+  /imports/{batchId}:
+    get:
+      operationId: getImport
+      tags:
+      - M4
+      summary: 查询导入结果与恢复选项
+      description: '使用环节：导入后查看/刷新阶段内容。
+
+        成功/副作用：只读阶段、证据、规范化候选、结果/原因、允许动作；不因刷新而继续入账。
+
+        异常/边界：只读本人批次；两个游标独立，summary始终全批；unsupported/ineffective是已说明终态，不等于created。'
+      parameters:
+      - $ref: '#/components/parameters/Limit'
+      - name: rows_cursor
+        in: query
+        required: false
+        schema: *id006
+      - name: reconciliation_cursor
+        in: query
+        required: false
+        schema: *id006
+      - name: batchId
+        in: path
+        required: true
+        schema: *id001
+      responses:
+        '200':
+          description: 只读结果；无业务数据库修改。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResponse'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /imports/{batchId}/resolutions:
+    post:
+      operationId: resolveImport
+      tags:
+      - M4
+      summary: 确认解释并继续导入
+      description: '使用环节：档案选择、批次继续、角色确认或同事件确认。
+
+        成功/副作用：select_source_profile固定档案并处理就绪行；resume批次继续，不要求逐行点创建；set_transfer_role保存合法角色并继续本行；create_transaction明确确认新事件后继续本行；link只关联同一事件；accept_source_change只确认来源变化、不改已存交易。
+
+        异常/边界：档案动作比较profile_version；行决策比较expected_source_version，不锁整个batch；resume用最新就绪来源且每行防重复。旧观察不可覆盖新事实；unsupported/ineffective/failed不可create/link；无有效交易且条件齐备可创建独立refund，禁止手动伪造来源。参数/权限错误整个请求无修改；执行阶段账务失败按行报告，证据/解释可已保存。'
+      parameters:
+      - name: batchId
+        in: path
+        required: true
+        schema: *id001
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportResponse'
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Resolution'
+            example:
+              action: resume
+  /source-payment-method-mappings:
+    get:
+      operationId: listMappings
+      tags:
+      - M4
+      summary: 查询档案渠道映射
+      description: '使用环节：导入需要选择实际账户。
+
+        成功/副作用：只读本人profile已有映射。
+
+        异常/边界：无映射[]；无profile/他人profile422或404；钱包不得跨账号串用，银行卡可确认复用。'
+      parameters:
+      - name: source_account_profile_id
+        in: query
+        required: true
+        schema: *id001
+      responses:
+        '200':
+          description: 只读结果；无业务数据库修改。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Mapping'
+                required:
+                - data
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+    put:
+      operationId: putMapping
+      tags:
+      - M4
+      summary: 保存渠道到实际账户映射
+      description: '使用环节：用户选择一次渠道实际账户。
+
+        成功/副作用：expected_version=0表示新建，否则比较本映射版本；只更新映射，不直接改变既有交易或开始入账；客户端随后自动调用resume，不再逐行确认。
+
+        异常/边界：同profile/key唯一；新建已存在或更新版本冲突409；钱包跨档案冲突422；目标必须本人可写；重复相同值不增版本。'
+      parameters: []
+      responses:
+        '200':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Mapping'
+                required:
+                - data
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MappingPut'
+            example:
+              source_account_profile_id: profile-a
+              canonical_method_key: 微信零钱
+              account_id: account-a
+              expected_version: 0
+  /imports/{batchId}/reconciliation-reviews:
+    post:
+      operationId: reviewReconciliation
+      tags:
+      - M4
+      summary: 处理无来源手动账单核对项
+      description: '使用环节：用户保留或删除核对账单。
+
+        成功/副作用：比较核对项自己的version；keep仅设kept_manual；delete通过M3撤销本人手动交易并关闭核对项，返回资金/月份变化。
+
+        异常/边界：核对项/交易/profile/batch关联与归属全验证；已匹配来源的项目不能再删除；删除不安全409且核对状态不改；同意图重复不二次删账，不拿全batch版本挡其他项。'
+      parameters:
+      - name: batchId
+        in: path
+        required: true
+        schema: *id001
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ReviewResult'
+                required:
+                - data
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequest'
+            example:
+              reconciliation_item_id: review-a
+              expected_version: 1
+              action: keep_manual
+  /overview:
+    get:
+      operationId: getOverview
+      tags:
+      - M5
+      summary: 查询首页总览
+      description: '使用环节：登录后首页/切换历史月份。
+
+        成功/副作用：资金为当前可见四类份额，消费/预算是指定月本人数据；未绑定对象两份额null。
+
+        异常/边界：未来统计月422；无预算budget=null；净花销可负；上月日均0时变化率null；金额显示到分、中间不提前舍入；不修改预算/交易。'
+      parameters:
+      - name: month
+        in: query
+        required: true
+        schema: &id007
+          type: string
+          pattern: ^\d{4}-(0[1-9]|1[0-2])$
+      responses:
+        '200':
+          description: 只读结果；无业务数据库修改。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Overview'
+                required:
+                - data
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+  /budgets/{month}:
+    get:
+      operationId: getBudget
+      tags:
+      - M5
+      summary: 查询个人月预算
+      description: '使用环节：预算表单读取/未来预算查看。
+
+        成功/副作用：只读本人预算，未设置data=null。
+
+        异常/边界：合法未来月份允许；不返回对象预算写入口。'
+      parameters:
+      - name: month
+        in: path
+        required: true
+        schema: *id007
+      responses:
+        '200':
+          description: 只读结果；无业务数据库修改。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    anyOf:
+                    - $ref: '#/components/schemas/Budget'
+                    - type: 'null'
+                required:
+                - data
+                additionalProperties: false
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+    put:
+      operationId: putBudget
+      tags:
+      - M5
+      summary: 设置个人月预算
+      description: '使用环节：首页/预算表单保存。
+
+        成功/副作用：0版本创建，否则比较本人该月预算version并整体替换；不产生资金变动，overview随后使用新预算。
+
+        异常/边界：金额非负整数；存在/版本冲突409，非法月份422；相同值不增版本；不能指定他人user_id。'
+      parameters:
+      - name: month
+        in: path
+        required: true
+        schema: *id007
+      responses:
+        '200':
+          description: 已完成该操作。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Budget'
+                required:
+                - data
+                additionalProperties: false
+        '400':
+          $ref: '#/components/responses/Error400'
+        '401':
+          $ref: '#/components/responses/Error401'
+        '403':
+          $ref: '#/components/responses/Error403'
+        '404':
+          $ref: '#/components/responses/Error404'
+        '409':
+          $ref: '#/components/responses/Error409'
+        '422':
+          $ref: '#/components/responses/Error422'
+        '500':
+          $ref: '#/components/responses/Error500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BudgetPut'
+            example:
+              budget_minor: 300000
+              expected_version: 0
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 已验证凭据；签发供应商由部署选型确定，非默认为JWT。
+  parameters:
+    View:
+      name: view
+      in: query
+      required: false
+      schema:
+        type: string
+        enum:
+        - mine
+        - partner
+        default: mine
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      schema: *id006
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: 本人+方法+路径作用域；24小时内同键同规范化请求重放原结果；同键不同请求409；进行中409 REQUEST_IN_PROGRESS。过期不保证避免重复。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      description: 目标资源的当前强ETag，例如"3"；缺失428、过期412；幂等重放先于版本比较。
+      schema:
+        type: string
+        pattern: ^"[1-9][0-9]*"$
+  schemas:
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          enum:
+          - BAD_REQUEST
+          - UNAUTHENTICATED
+          - FORBIDDEN
+          - RESOURCE_NOT_FOUND
+          - RESOURCE_VERSION_CONFLICT
+          - PRECONDITION_REQUIRED
+          - IDEMPOTENCY_KEY_CONFLICT
+          - REQUEST_IN_PROGRESS
+          - FUNDS_ALLOCATION_NOT_POSSIBLE
+          - OPENING_STATE_RECALCULATION_CONFLICT
+          - VALIDATION_ERROR
+          - REFUND_REQUIRES_OFFICIAL_SOURCE
+          - UNSUPPORTED_SOURCE_FILE
+          - BINDING_INVITATION_INVALID
+          - RELATIONSHIP_CONFLICT
+          - SOURCE_OBSERVATION_STALE
+          - SOURCE_STATE_CONFLICT
+          - PAYLOAD_TOO_LARGE
+          - INTERNAL_ERROR
+        message: *id006
+      required:
+      - code
+      - message
+      additionalProperties: false
+    ShareRef:
+      oneOf:
+      - type: object
+        properties:
+          fund_owner:
+            const: self
+          fund_type:
+            const: liquid
+        required:
+        - fund_owner
+        - fund_type
+        additionalProperties: false
+      - type: object
+        properties:
+          fund_owner:
+            const: self
+          fund_type:
+            const: savings
+        required:
+        - fund_owner
+        - fund_type
+        additionalProperties: false
+      - type: object
+        properties:
+          fund_owner:
+            const: partner
+          fund_type:
+            const: savings
+        required:
+        - fund_owner
+        - fund_type
+        additionalProperties: false
+    WriteAllocation:
+      oneOf:
+      - type: object
+        properties:
+          fund_owner:
+            const: self
+          fund_type:
+            const: liquid
+          amount_minor: &id008
+            type: integer
+            minimum: 0
+        required:
+        - fund_owner
+        - fund_type
+        - amount_minor
+        additionalProperties: false
+      - type: object
+        properties:
+          fund_owner:
+            const: self
+          fund_type:
+            const: savings
+          amount_minor: *id008
+        required:
+        - fund_owner
+        - fund_type
+        - amount_minor
+        additionalProperties: false
+      - type: object
+        properties:
+          fund_owner:
+            const: partner
+          fund_type:
+            const: savings
+          amount_minor: *id008
+        required:
+        - fund_owner
+        - fund_type
+        - amount_minor
+        additionalProperties: false
+    FundShare:
+      type: object
+      properties:
+        fund_owner:
+          type: string
+          enum:
+          - self
+          - partner
+        fund_type:
+          type: string
+          enum:
+          - liquid
+          - savings
+        amount_minor: *id008
+        savings_baseline_minor:
+          anyOf:
+          - *id008
+          - type: 'null'
+        savings_gap_minor:
+          anyOf:
+          - *id008
+          - type: 'null'
+      required:
+      - fund_owner
+      - fund_type
+      - amount_minor
+      - savings_baseline_minor
+      - savings_gap_minor
+      additionalProperties: false
+    OpeningState:
+      type: object
+      properties:
+        opening_date: *id005
+        opening_balance_minor: *id008
+        opening_allocations:
+          type: array
+          items:
+            $ref: '#/components/schemas/WriteAllocation'
+          minItems: 1
+          maxItems: 3
+      required:
+      - opening_date
+      - opening_balance_minor
+      - opening_allocations
+      additionalProperties: false
+    AccountCreate:
+      type: object
+      properties:
+        name: &id009
+          type: string
+          minLength: 1
+          maxLength: 80
+        account_type:
+          type: string
+          enum:
+          - cash
+          - bank_card
+          - wechat_balance
+          - alipay_balance
+          - other
+        custodian:
+          type: string
+          enum:
+          - self
+          - partner
+          default: self
+        opening_state:
+          $ref: '#/components/schemas/OpeningState'
+      required:
+      - name
+      - account_type
+      - opening_state
+      additionalProperties: false
+    AccountPatch:
+      type: object
+      properties:
+        name: *id009
+        account_type:
+          type: string
+          enum:
+          - cash
+          - bank_card
+          - wechat_balance
+          - alipay_balance
+          - other
+        custodian:
+          type: string
+          enum:
+          - self
+          - partner
+      required: []
+      additionalProperties: false
+    Account:
+      type: object
+      properties:
+        id: *id001
+        name: *id009
+        account_type:
+          type: string
+          enum:
+          - cash
+          - bank_card
+          - wechat_balance
+          - alipay_balance
+          - other
+        holder:
+          type: string
+          enum:
+          - self
+          - partner
+        custodian:
+          type: string
+          enum:
+          - self
+          - partner
+        opening_state:
+          $ref: '#/components/schemas/OpeningState'
+        balance_minor: *id008
+        fund_shares:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundShare'
+          minItems: 1
+          maxItems: 3
+        version: &id010
+          type: integer
+          minimum: 1
+        read_only: &id028
+          type: boolean
+      required:
+      - id
+      - name
+      - account_type
+      - holder
+      - custodian
+      - opening_state
+      - balance_minor
+      - fund_shares
+      - version
+      - read_only
+      additionalProperties: false
+    AccountBalance:
+      type: object
+      properties:
+        account_id: *id001
+        balance_minor: *id008
+        fund_shares:
+          type: array
+          items:
+            $ref: '#/components/schemas/FundShare'
+        version: *id010
+      required:
+      - account_id
+      - balance_minor
+      - fund_shares
+      - version
+      additionalProperties: false
+    FundAdjustment:
+      type: object
+      properties:
+        from:
+          $ref: '#/components/schemas/ShareRef'
+        to:
+          $ref: '#/components/schemas/ShareRef'
+        amount_minor: *id010
+      required:
+      - from
+      - to
+      - amount_minor
+      additionalProperties: false
+    SourceSummary:
+      type: object
+      properties:
+        source_record_id: *id001
+        platform:
+          type: string
+          enum:
+          - wechat
+          - alipay
+        source_occurred_at: &id014
+          type: string
+          format: date-time
+          pattern: ^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$
+      required:
+      - source_record_id
+      - platform
+      - source_occurred_at
+      additionalProperties: false
+    IncomeTransaction:
+      type: object
+      properties:
+        id: &id012
+          type: string
+          minLength: 1
+        type:
+          const: income
+        accounting_semantics:
+          const: ordinary
+        amount_minor: &id013
+          type: integer
+          minimum: 1
+        occurred_at:
+          type: string
+          format: date-time
+          pattern: ^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$
+        category_code:
+          type: string
+          enum:
+          - food
+          - shopping
+          - transport
+          - education
+          - health
+          - entertainment
+          - utilities
+          - other
+        merchant: &id011
+          type: string
+        note: *id011
+        source_account_profile_id:
+          anyOf:
+          - *id012
+          - type: 'null'
+        source_summaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceSummary'
+        version: *id013
+        read_only:
+          type: boolean
+        account_id: *id001
+      required:
+      - id
+      - type
+      - accounting_semantics
+      - amount_minor
+      - occurred_at
+      - category_code
+      - merchant
+      - note
+      - source_account_profile_id
+      - source_summaries
+      - version
+      - read_only
+      - account_id
+      additionalProperties: false
+    IncomeCreate:
+      type: object
+      properties:
+        amount_minor: *id010
+        occurred_at: *id014
+        category_code: &id019
+          type: string
+          enum: *id015
+          default: other
+        merchant: &id020
+          type: string
+          default: ''
+        note: &id021
+          type: string
+          default: ''
+        source_account_profile_id: *id001
+        type:
+          const: income
+        account_id: *id001
+      required:
+      - type
+      - amount_minor
+      - occurred_at
+      - account_id
+      additionalProperties: false
+    ExpenseTransaction:
+      type: object
+      properties:
+        id: &id017
+          type: string
+          minLength: 1
+        type:
+          const: expense
+        accounting_semantics:
+          const: ordinary
+        amount_minor: &id018
+          type: integer
+          minimum: 1
+        occurred_at:
+          type: string
+          format: date-time
+          pattern: ^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$
+        category_code:
+          type: string
+          enum:
+          - food
+          - shopping
+          - transport
+          - education
+          - health
+          - entertainment
+          - utilities
+          - other
+        merchant: &id016
+          type: string
+        note: *id016
+        source_account_profile_id:
+          anyOf:
+          - *id017
+          - type: 'null'
+        source_summaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceSummary'
+        version: *id018
+        read_only:
+          type: boolean
+        account_id: *id001
+      required:
+      - id
+      - type
+      - accounting_semantics
+      - amount_minor
+      - occurred_at
+      - category_code
+      - merchant
+      - note
+      - source_account_profile_id
+      - source_summaries
+      - version
+      - read_only
+      - account_id
+      additionalProperties: false
+    ExpenseCreate:
+      type: object
+      properties:
+        amount_minor: *id010
+        occurred_at: *id014
+        category_code: *id019
+        merchant: *id020
+        note: *id021
+        source_account_profile_id: *id001
+        type:
+          const: expense
+        account_id: *id001
+      required:
+      - type
+      - amount_minor
+      - occurred_at
+      - account_id
+      additionalProperties: false
+    TransferTransaction:
+      type: object
+      properties:
+        id: &id023
+          type: string
+          minLength: 1
+        type:
+          const: transfer
+        accounting_semantics:
+          const: internal_transfer
+        amount_minor: &id024
+          type: integer
+          minimum: 1
+        occurred_at:
+          type: string
+          format: date-time
+          pattern: ^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$
+        category_code:
+          type: string
+          enum:
+          - food
+          - shopping
+          - transport
+          - education
+          - health
+          - entertainment
+          - utilities
+          - other
+        merchant: &id022
+          type: string
+        note: *id022
+        source_account_profile_id:
+          anyOf:
+          - *id023
+          - type: 'null'
+        source_summaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceSummary'
+        version: *id024
+        read_only:
+          type: boolean
+        from_account_id: *id001
+        to_account_id: *id001
+      required:
+      - id
+      - type
+      - accounting_semantics
+      - amount_minor
+      - occurred_at
+      - category_code
+      - merchant
+      - note
+      - source_account_profile_id
+      - source_summaries
+      - version
+      - read_only
+      - from_account_id
+      - to_account_id
+      additionalProperties: false
+    TransferCreate:
+      type: object
+      properties:
+        amount_minor: *id010
+        occurred_at: *id014
+        category_code: *id019
+        merchant: *id020
+        note: *id021
+        source_account_profile_id: *id001
+        type:
+          const: transfer
+        from_account_id: *id001
+        to_account_id: *id001
+      required:
+      - type
+      - amount_minor
+      - occurred_at
+      - from_account_id
+      - to_account_id
+      additionalProperties: false
+    RefundTransaction:
+      type: object
+      properties:
+        id: &id026
+          type: string
+          minLength: 1
+        type:
+          const: refund
+        accounting_semantics:
+          const: refund_inflow
+        amount_minor: &id027
+          type: integer
+          minimum: 1
+        occurred_at:
+          type: string
+          format: date-time
+          pattern: ^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$
+        category_code:
+          type: string
+          enum:
+          - food
+          - shopping
+          - transport
+          - education
+          - health
+          - entertainment
+          - utilities
+          - other
+        merchant: &id025
+          type: string
+        note: *id025
+        source_account_profile_id:
+          anyOf:
+          - *id026
+          - type: 'null'
+        source_summaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceSummary'
+        version: *id027
+        read_only:
+          type: boolean
+        account_id: *id001
+        refund_kind:
+          type: string
+          enum:
+          - merchant_refund
+          - transfer_return
+        affects_spending: *id028
+      required:
+      - id
+      - type
+      - accounting_semantics
+      - amount_minor
+      - occurred_at
+      - category_code
+      - merchant
+      - note
+      - source_account_profile_id
+      - source_summaries
+      - version
+      - read_only
+      - account_id
+      - refund_kind
+      - affects_spending
+      additionalProperties: false
+    ManualCreate:
+      oneOf:
+      - $ref: '#/components/schemas/IncomeCreate'
+      - $ref: '#/components/schemas/ExpenseCreate'
+      - $ref: '#/components/schemas/TransferCreate'
+    Transaction:
+      oneOf:
+      - $ref: '#/components/schemas/IncomeTransaction'
+      - $ref: '#/components/schemas/ExpenseTransaction'
+      - $ref: '#/components/schemas/TransferTransaction'
+      - $ref: '#/components/schemas/RefundTransaction'
+    TransactionPatch:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+          - income
+          - expense
+          - transfer
+        amount_minor: *id010
+        occurred_at: *id014
+        account_id: *id001
+        from_account_id: *id001
+        to_account_id: *id001
+        category_code: *id029
+        merchant: *id006
+        note: *id006
+        source_account_profile_id:
+          anyOf:
+          - *id001
+          - type: 'null'
+        affects_spending: *id028
+      required: []
+      additionalProperties: false
+    Effect:
+      type: object
+      properties:
+        account_id: *id001
+        role:
+          type: string
+          enum:
+          - primary
+          - from
+          - to
+        status:
+          type: string
+          enum:
+          - applied
+          - historical_only
+        signed_amount_minor: &id031
+          type: integer
+      required:
+      - account_id
+      - role
+      - status
+      - signed_amount_minor
+      additionalProperties: false
+    Notice:
+      type: object
+      properties:
+        code:
+          type: string
+          enum:
+          - OWN_SAVINGS_USED
+          - PARTNER_SAVINGS_USED
+        amount_minor: *id010
+      required:
+      - code
+      - amount_minor
+      additionalProperties: false
+    Mutation:
+      type: object
+      properties:
+        transaction:
+          $ref: '#/components/schemas/Transaction'
+        account_effects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Effect'
+        account_changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountBalance'
+        affected_months:
+          type: array
+          items: *id007
+          uniqueItems: true
+        notices:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notice'
+      required:
+      - transaction
+      - account_effects
+      - account_changes
+      - affected_months
+      - notices
+      additionalProperties: false
+    DeleteResult:
+      type: object
+      properties:
+        deleted_transaction_id: *id001
+        account_changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountBalance'
+        affected_months:
+          type: array
+          items: *id007
+          uniqueItems: true
+      required:
+      - deleted_transaction_id
+      - account_changes
+      - affected_months
+      additionalProperties: false
+    Category:
+      type: object
+      properties:
+        code: *id029
+        name: *id006
+      required:
+      - code
+      - name
+      additionalProperties: false
+    Relationship:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - unbound
+          - bound
+        partner:
+          anyOf:
+          - type: object
+            properties:
+              id: *id001
+              display_name: *id006
+            required:
+            - id
+            - display_name
+            additionalProperties: false
+          - type: 'null'
+        permissions:
+          type: object
+          properties:
+            partner_accounts:
+              type: string
+              enum:
+              - none
+              - read_only
+            partner_transactions:
+              type: string
+              enum:
+              - none
+              - read_only
+          required:
+          - partner_accounts
+          - partner_transactions
+          additionalProperties: false
+      required:
+      - status
+      - partner
+      - permissions
+      additionalProperties: false
+    BindingInvitation:
+      type: object
+      properties:
+        binding_token: *id001
+        expires_at: *id014
+      required:
+      - binding_token
+      - expires_at
+      additionalProperties: false
+    BindRequest:
+      type: object
+      properties:
+        binding_token: *id001
+      required:
+      - binding_token
+      additionalProperties: false
+    Profile:
+      type: object
+      properties:
+        id: *id001
+        platform:
+          type: string
+          enum:
+          - wechat
+          - alipay
+        label: *id006
+      required:
+      - id
+      - platform
+      - label
+      additionalProperties: false
+    Mapping:
+      type: object
+      properties:
+        id: *id001
+        source_account_profile_id: *id001
+        canonical_method_key: *id001
+        account_id: *id001
+        version: *id010
+      required:
+      - id
+      - source_account_profile_id
+      - canonical_method_key
+      - account_id
+      - version
+      additionalProperties: false
+    MappingPut:
+      type: object
+      properties:
+        source_account_profile_id: *id001
+        canonical_method_key: *id001
+        account_id: *id001
+        expected_version: *id008
+      required:
+      - source_account_profile_id
+      - canonical_method_key
+      - account_id
+      - expected_version
+      additionalProperties: false
+    Candidate:
+      type: object
+      properties:
+        type:
+          anyOf:
+          - type: string
+            enum:
+            - income
+            - expense
+            - transfer
+            - refund
+          - type: 'null'
+        accounting_semantics:
+          anyOf:
+          - type: string
+            enum:
+            - ordinary
+            - internal_transfer
+            - refund_inflow
+          - type: 'null'
+        amount_minor:
+          anyOf:
+          - *id010
+          - type: 'null'
+        source_occurred_at:
+          anyOf:
+          - *id014
+          - type: 'null'
+        occurred_at:
+          anyOf:
+          - *id014
+          - type: 'null'
+        category_code: *id029
+        merchant: *id006
+        note: *id006
+        account_hint:
+          anyOf:
+          - *id006
+          - type: 'null'
+        from_account_hint:
+          anyOf:
+          - *id006
+          - type: 'null'
+        to_account_hint:
+          anyOf:
+          - *id006
+          - type: 'null'
+        account_id:
+          anyOf:
+          - *id001
+          - type: 'null'
+        from_account_id:
+          anyOf:
+          - *id001
+          - type: 'null'
+        to_account_id:
+          anyOf:
+          - *id001
+          - type: 'null'
+        refund_kind:
+          anyOf:
+          - type: string
+            enum:
+            - merchant_refund
+            - transfer_return
+          - type: 'null'
+        affects_spending:
+          anyOf:
+          - *id028
+          - type: 'null'
+        canonical_method_key: &id030
+          anyOf:
+          - type: string
+            minLength: 1
+          - type: 'null'
+        from_canonical_method_key: *id030
+        to_canonical_method_key: *id030
+      required:
+      - type
+      - accounting_semantics
+      - amount_minor
+      - source_occurred_at
+      - occurred_at
+      - category_code
+      - merchant
+      - note
+      - account_hint
+      - from_account_hint
+      - to_account_hint
+      - account_id
+      - from_account_id
+      - to_account_id
+      - refund_kind
+      - affects_spending
+      - canonical_method_key
+      - from_canonical_method_key
+      - to_canonical_method_key
+      additionalProperties: false
+    Evidence:
+      type: object
+      properties:
+        source_kind:
+          anyOf:
+          - *id006
+          - type: 'null'
+        source_status:
+          anyOf:
+          - *id006
+          - type: 'null'
+        source_direction:
+          anyOf:
+          - *id006
+          - type: 'null'
+        account_evidence:
+          anyOf:
+          - *id006
+          - type: 'null'
+        discount_tags:
+          type: array
+          items: *id006
+        merchant_order_id:
+          anyOf:
+          - *id006
+          - type: 'null'
+        raw_fields:
+          type: object
+          additionalProperties: true
+        canonical_method_keys:
+          type: array
+          items:
+            type: string
+            minLength: 1
+      required:
+      - source_kind
+      - source_status
+      - source_direction
+      - account_evidence
+      - discount_tags
+      - merchant_order_id
+      - raw_fields
+      - canonical_method_keys
+      additionalProperties: false
+    ImportRow:
+      type: object
+      properties:
+        observation_id: *id001
+        row_number: *id010
+        source_record_id:
+          anyOf:
+          - *id001
+          - type: 'null'
+        source_version:
+          anyOf:
+          - *id010
+          - type: 'null'
+        phase:
+          type: string
+          enum:
+          - file_read
+          - profile_resolution
+          - normalization
+          - account_resolution
+          - transaction_resolution
+          - posted
+        disposition:
+          type: string
+          enum:
+          - created
+          - linked_existing
+          - duplicate_existing
+          - unsupported
+          - ineffective
+          - needs_review
+          - failed
+        reason_codes:
+          type: array
+          items: *id006
+        evidence:
+          $ref: '#/components/schemas/Evidence'
+        candidate:
+          $ref: '#/components/schemas/Candidate'
+        transaction_id:
+          anyOf:
+          - *id001
+          - type: 'null'
+        candidate_transaction_ids:
+          type: array
+          items: *id001
+        allowed_actions:
+          type: array
+          items:
+            type: string
+            enum:
+            - select_source_profile
+            - resume
+            - set_transfer_role
+            - create_transaction
+            - link_existing_transaction
+            - accept_source_change
+      required:
+      - observation_id
+      - row_number
+      - source_record_id
+      - source_version
+      - phase
+      - disposition
+      - reason_codes
+      - evidence
+      - candidate
+      - transaction_id
+      - candidate_transaction_ids
+      - allowed_actions
+      additionalProperties: false
+    ImportSummary:
+      type: object
+      properties:
+        read_rows: *id008
+        created: *id008
+        linked_existing: *id008
+        duplicate_existing: *id008
+        unsupported: *id008
+        ineffective: *id008
+        needs_review: *id008
+        failed: *id008
+        manual_transactions_not_found: *id008
+        reconciliation_items_rechecked: *id008
+      required:
+      - read_rows
+      - created
+      - linked_existing
+      - duplicate_existing
+      - unsupported
+      - ineffective
+      - needs_review
+      - failed
+      - manual_transactions_not_found
+      - reconciliation_items_rechecked
+      additionalProperties: false
+    Coverage:
+      type: object
+      properties:
+        structural_complete: *id028
+        declared_from:
+          anyOf:
+          - *id014
+          - type: 'null'
+        declared_to:
+          anyOf:
+          - *id014
+          - type: 'null'
+        exported_at:
+          anyOf:
+          - *id014
+          - type: 'null'
+        export_type:
+          type: string
+          enum:
+          - all_transactions
+          - partial
+          - unknown
+        effective_from:
+          anyOf:
+          - *id014
+          - type: 'null'
+        effective_to:
+          anyOf:
+          - *id014
+          - type: 'null'
+        declared_record_count:
+          anyOf:
+          - *id008
+          - type: 'null'
+        parsed_record_count: *id008
+        reconciliation_eligible: *id028
+        blockers:
+          type: array
+          items: *id006
+      required:
+      - structural_complete
+      - declared_from
+      - declared_to
+      - exported_at
+      - export_type
+      - effective_from
+      - effective_to
+      - declared_record_count
+      - parsed_record_count
+      - reconciliation_eligible
+      - blockers
+      additionalProperties: false
+    Reconciliation:
+      type: object
+      properties:
+        id: *id001
+        transaction_id: *id001
+        source_account_profile_id: *id001
+        status:
+          type: string
+          enum:
+          - pending_confirmation
+          - kept_manual
+          - matched_to_source
+        version: *id010
+        reason_code:
+          const: NO_SOURCE_MATCH_WITHIN_COVERAGE
+      required:
+      - id
+      - transaction_id
+      - source_account_profile_id
+      - status
+      - version
+      - reason_code
+      additionalProperties: false
+    ImportBatch:
+      type: object
+      properties:
+        batch_id: *id001
+        platform:
+          type: string
+          enum:
+          - wechat
+          - alipay
+        status:
+          type: string
+          enum:
+          - completed
+          - needs_review
+          - failed
+        source_account_profile:
+          anyOf:
+          - $ref: '#/components/schemas/Profile'
+          - type: 'null'
+        profile_version: *id008
+        profile_candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/Profile'
+        summary:
+          $ref: '#/components/schemas/ImportSummary'
+        coverage:
+          $ref: '#/components/schemas/Coverage'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportRow'
+        reconciliation_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Reconciliation'
+        source_metadata:
+          type: object
+          additionalProperties: true
+          description: 本人可见的原始文件头元数据快照，不用于客户端自行授权或推断账号唯一身份。
+      required:
+      - batch_id
+      - platform
+      - status
+      - source_account_profile
+      - profile_version
+      - profile_candidates
+      - summary
+      - coverage
+      - rows
+      - reconciliation_items
+      - source_metadata
+      additionalProperties: false
+    Resolution:
+      oneOf:
+      - type: object
+        properties:
+          action:
+            const: select_source_profile
+          profile_version: *id008
+          profile_id: *id001
+          create_label: *id009
+        required:
+        - action
+        - profile_version
+        additionalProperties: false
+        oneOf:
+        - required:
+          - profile_id
+          not:
+            required:
+            - create_label
+        - required:
+          - create_label
+          not:
+            required:
+            - profile_id
+      - type: object
+        properties:
+          action:
+            const: resume
+        required:
+        - action
+        additionalProperties: false
+      - type: object
+        properties:
+          action:
+            const: set_transfer_role
+          observation_id: *id001
+          expected_source_version: *id010
+          type:
+            const: income
+          account_id: *id001
+        required:
+        - action
+        - observation_id
+        - expected_source_version
+        - type
+        - account_id
+        additionalProperties: false
+      - type: object
+        properties:
+          action:
+            const: set_transfer_role
+          observation_id: *id001
+          expected_source_version: *id010
+          type:
+            const: expense
+          account_id: *id001
+        required:
+        - action
+        - observation_id
+        - expected_source_version
+        - type
+        - account_id
+        additionalProperties: false
+      - type: object
+        properties:
+          action:
+            const: set_transfer_role
+          observation_id: *id001
+          expected_source_version: *id010
+          type:
+            const: transfer
+          from_account_id: *id001
+          to_account_id: *id001
+        required:
+        - action
+        - observation_id
+        - expected_source_version
+        - type
+        - from_account_id
+        - to_account_id
+        additionalProperties: false
+      - type: object
+        properties:
+          action:
+            const: create_transaction
+          observation_id: *id001
+          expected_source_version: *id010
+        required:
+        - action
+        - observation_id
+        - expected_source_version
+        additionalProperties: false
+      - type: object
+        properties:
+          action:
+            const: link_existing_transaction
+          observation_id: *id001
+          expected_source_version: *id010
+          transaction_id: *id001
+        required:
+        - action
+        - observation_id
+        - expected_source_version
+        - transaction_id
+        additionalProperties: false
+      - type: object
+        properties:
+          action:
+            const: accept_source_change
+          observation_id: *id001
+          expected_source_version: *id010
+        required:
+        - action
+        - observation_id
+        - expected_source_version
+        additionalProperties: false
+    ReviewRequest:
+      type: object
+      properties:
+        reconciliation_item_id: *id001
+        expected_version: *id010
+        action:
+          type: string
+          enum:
+          - keep_manual
+          - delete_manual_transaction
+      required:
+      - reconciliation_item_id
+      - expected_version
+      - action
+      additionalProperties: false
+    ReviewResult:
+      type: object
+      properties:
+        reconciliation_item_id: *id001
+        status:
+          type: string
+          enum:
+          - kept_manual
+          - deleted
+        transaction_id: *id001
+        account_changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountBalance'
+        affected_months:
+          type: array
+          items: *id007
+        version:
+          anyOf:
+          - *id010
+          - type: 'null'
+      required:
+      - reconciliation_item_id
+      - status
+      - transaction_id
+      - account_changes
+      - affected_months
+      - version
+      additionalProperties: false
+    Budget:
+      type: object
+      properties:
+        month: *id007
+        budget_minor: *id008
+        version: *id010
+      required:
+      - month
+      - budget_minor
+      - version
+      additionalProperties: false
+    BudgetPut:
+      type: object
+      properties:
+        budget_minor: *id008
+        expected_version: *id008
+      required:
+      - budget_minor
+      - expected_version
+      additionalProperties: false
+    Overview:
+      type: object
+      properties:
+        month: *id007
+        as_of_date: *id005
+        relationship_status:
+          type: string
+          enum:
+          - unbound
+          - bound
+        funds:
+          type: object
+          properties:
+            my_liquid_minor: *id008
+            my_savings_minor: *id008
+            partner_liquid_minor:
+              anyOf:
+              - *id008
+              - type: 'null'
+            partner_savings_minor:
+              anyOf:
+              - *id008
+              - type: 'null'
+            visible_total_minor: *id008
+          required:
+          - my_liquid_minor
+          - my_savings_minor
+          - partner_liquid_minor
+          - partner_savings_minor
+          - visible_total_minor
+          additionalProperties: false
+        personal_spending:
+          type: object
+          properties:
+            expense_minor: *id008
+            refund_offset_minor: *id008
+            month_spent_minor: *id031
+            daily_average_minor: *id031
+            previous_month_daily_average_minor: *id031
+            daily_change_minor: *id031
+            daily_change_rate:
+              anyOf:
+              - type: number
+              - type: 'null'
+            projected_month_spending_minor: *id031
+          required:
+          - expense_minor
+          - refund_offset_minor
+          - month_spent_minor
+          - daily_average_minor
+          - previous_month_daily_average_minor
+          - daily_change_minor
+          - daily_change_rate
+          - projected_month_spending_minor
+          additionalProperties: false
+        budget:
+          anyOf:
+          - type: object
+            properties:
+              budget_minor: *id008
+              spent_minor: *id031
+              remaining_minor: *id008
+              over_budget_minor: *id008
+              status:
+                type: string
+                enum:
+                - within_budget
+                - over_budget
+            required:
+            - budget_minor
+            - spent_minor
+            - remaining_minor
+            - over_budget_minor
+            - status
+            additionalProperties: false
+          - type: 'null'
+      required:
+      - month
+      - as_of_date
+      - relationship_status
+      - funds
+      - personal_spending
+      - budget
+      additionalProperties: false
+    ImportResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/ImportBatch'
+        page:
+          type: object
+          properties:
+            rows_next_cursor:
+              anyOf:
+              - *id006
+              - type: 'null'
+            reconciliation_next_cursor:
+              anyOf:
+              - *id006
+              - type: 'null'
+          required:
+          - rows_next_cursor
+          - reconciliation_next_cursor
+          additionalProperties: false
+      required:
+      - data
+      - page
+      additionalProperties: false
+  responses:
+    Error401:
+      description: 登录凭据无效。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHENTICATED
+            message: 登录凭据无效。
+    Error403:
+      description: 当前资源只读，不能修改。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: FORBIDDEN
+            message: 当前资源只读，不能修改。
+    Error404:
+      description: 资源不存在或不可访问。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: RESOURCE_NOT_FOUND
+            message: 资源不存在或不可访问。
+    Error422:
+      description: 请求字段或业务条件不合法。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: VALIDATION_ERROR
+            message: 请求字段或业务条件不合法。
+    Error500:
+      description: 本次操作未能完成。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: INTERNAL_ERROR
+            message: 本次操作未能完成。
+    Error400:
+      description: 请求结构无法解析。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: BAD_REQUEST
+            message: 请求结构无法解析。
+    Error409:
+      description: 当前业务状态不允许该操作。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: SOURCE_STATE_CONFLICT
+            message: 当前业务状态不允许该操作。
+    Error412:
+      description: 资源已被修改，请刷新。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: RESOURCE_VERSION_CONFLICT
+            message: 资源已被修改，请刷新。
+    Error428:
+      description: 请携带当前资源版本。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: PRECONDITION_REQUIRED
+            message: 请携带当前资源版本。
+    Error413:
+      description: 文件超出支持范围。
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: PAYLOAD_TOO_LARGE
+            message: 文件超出支持范围。

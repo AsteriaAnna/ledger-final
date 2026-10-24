@@ -20,7 +20,7 @@ M4→M3交接命令包含合法type/semantics、整数金额、带时区记账�
 
 一笔创建/编辑/删除：Transaction、effects、movements、当前来源关联要么一起成功，要么一起失败。内部转账两端一起成功/失败；M2初始状态与受影响历史/有效状态一起成功/失败；删除核对手动交易与关闭核对项一起成功/失败。
 
-文件解析/原始观察可先保留，单行资金失败不等于来源读取失败。批次允许部分行成功，结果必须守恒，不能把保留证据说成入账。来源身份唯一与份额守恒是业务约束；请求幂等、version条件和原生事务方案按实施计划D1–D3由用户选择，不据此默认加新组件。不允许前端直写余额。
+文件解析/原始观察可先保留，单行资金失败不等于来源读取失败。批次允许部分行成功，结果必须守恒，不能把保留证据说成入账。来源身份唯一与份额守恒是业务约束；写入采用单库原生事务及并发控制；有重复执行风险的POST使用24小时幂等键，资源变更比较目标版本。无需新增外部组件。不允许前端直写余额。
 
 ## 3. M4文件级事实与识别范围
 
@@ -101,3 +101,37 @@ M4保管源身份、原始字段、状态、优惠、渠道键和判定证据；
 6条充值提现中3条充值、3条提现；其中2条提现有非零服务费，1条提现费为0。本期2条明确unsupported，4条无费内部转账候选可在两端映射确定后入账。当前不能把银行卡/微信零钱名称当已经绑定Account。
 
 以上是输入事实与参考流程验证，不是已部署服务验收。实验脚本及当前运行结果统一记入[实施计划](IMPLEMENTATION_PLAN.md)，不另保留过程报告/版本流水。
+
+## 8. 程序中的数据依赖与提交位置
+
+当前参考程序只有parse_file、ImportReference、Ledger和stats，没有HTTP适配器。下图规定未来实现职责，不把参考脚本当成已有服务器。
+
+```mermaid
+flowchart TB
+  API["HTTP适配器：校验契约、身份、版本与重试"] --> M1["M1：本人写及对象只读授权"]
+  M1 --> M2["M2：账户、起始状态、分配"]
+  M1 --> M3["M3：唯一交易写用例"]
+  M1 --> M4["M4：证据、候选与恢复"]
+  M4 -->|已确认来源命令| M3
+  M3 --> Funds["计算effects与资金计划"]
+  M2 --> Funds
+  Funds --> Commit["单库提交交易、资金和当前来源关联"]
+  Commit --> M5["M5：读取正式结果与预算"]
+  M1 --> M5
+```
+
+解析可以先保存观察；每个可执行来源单独调用同一M3用例。账务与来源当前关联共同提交；不通过服务端HTTP回调自己的手动创建接口，不用人工POST创建refund。GET只取快照；预算写只归M5，不触发账务重算。
+
+| 实际信息 | 读取与规范化 | 契约出口和下游依赖 |
+|---|---|---|
+| 支付宝66行渠道农业银行储蓄卡(2372)&闪购支付红包，40.79元 | account_evidence保留银行卡线索，discount_tags保留优惠，amount_minor=4079 | ImportRow.evidence/candidate；映射确认实际Account后M3扣4079分；不建立优惠账户 |
+| 微信支付方式/，状态已存入零钱 | 状态补微信零钱渠道证据；账户ID仍须映射 | candidate.account_id未定可为null；needs_review不扣款；确认后ordinary income |
+| 微信32/33行退款0.44/0.26，累计状态0.70 | 两个完整官方单号分别44/26分，merchant_refund，默认affects_spending=true | M4内部命令refund_inflow；各自到账，M5共抵减70分；不传原消费ID |
+| 来源时间与用户编辑日期 | source_occurred_at只读；occurred_at可编辑 | source_summaries保留原文时间；M3按账户起始日判断effects；M5按可编辑月份统计 |
+| 官方单号、来源档案、导出时间 | profile加完整单号为来源身份；新旧观察比较 | source_record_id/source_version；稳定关联去重，重导保留用户编辑 |
+| 未知实际账户、转账角色、资金归属 | 分别由M2账户、用户确认角色、既有份额提供 | 不从merchant、红包、尾号或文件昵称猜ID/归属；缺失时停止在候选 |
+| 覆盖范围与全批结果 | 导出时刻截断范围；七类结果守恒 | coverage决定是否生成reconciliation_items；核对结果不混入来源行数 |
+
+入站HTTP命令不接受派生accounting_semantics；M3从合法type计算。参考脚本当前账户/来源ID均为虚构映射；真实文件只能提供证据，不能证明真实用户权限或线上余额。
+
+渠道映射闭环：Evidence.canonical_method_keys保留全部规范键；Candidate.canonical_method_key用于单账户，from_canonical_method_key/to_canonical_method_key用于已明确内部转账两端，未明确角色/账户线索时为null。客户端从导入结果取键，结合listAccounts让本人选择Account，再putMapping并resolveImport(resume)。文件头原始信息在本人ImportBatch.source_metadata展示，不能成为客户端授权依据。
