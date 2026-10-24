@@ -582,7 +582,7 @@ V1 只支持微信和支付宝官方账单文件；截图识别不属于此接�
 - needs_review：批次已处理，但存在待处理来源记录或待用户确认的手动交易核对项。
 - failed：文件无法安全解析或批次无法完成；不得报告为成功入账。
 
-`transactions_created`、`transactions_linked` 和 `duplicate_sources_ignored` 是互斥计数。`source_records_needing_review` 统计官方文件中的来源行待处理项；`manual_transactions_not_found` 统计完整覆盖范围内未找到对应来源的手动交易，两者不可合并。`coverage.complete` 为 false 或覆盖范围无法确定时，不得生成“未找到来源”的核对项。解析失败行、待处理记录不能伪装成已入账交易。
+`transactions_created`、`transactions_linked` 和 `duplicate_sources_ignored` 是互斥计数。`source_records_needing_review` 统计官方文件中的来源行待处理项；`manual_transactions_not_found` 统计本批次生成的未匹配手动交易核对项（无论之后是否已确认），两者不可合并。当前待确认数量以每个 reconciliation item 的 status 为准。`coverage.complete` 为 false 或覆盖范围无法确定时，不得生成“未找到来源”的核对项。解析失败行、待处理记录不能伪装成已入账交易。
 
 ### 7.2 导入处理约束
 
