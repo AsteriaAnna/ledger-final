@@ -127,7 +127,7 @@
 | M2 账户与资金归属 | PUT /api/v1/accounts/{accountId}/opening-state | 修正初始余额、起始日期与初始份额 |
 | M2 账户与资金归属 | POST /api/v1/accounts/{accountId}/fund-adjustments | 在同一账户内调整资金归属/性质 |
 | M3 交易账务 | GET /api/v1/transactions?view=mine | 账单列表、搜索与筛选 |
-| M3 交易账务 | POST /api/v1/transactions | 创建收入、支出、转账或退款 |
+| M3 交易账务 | POST /api/v1/transactions | 手动创建收入、支出或转账；退款只能由官方导入创建 |
 | M3 交易账务 | GET /api/v1/transactions/{transactionId} | 查看账单详情 |
 | M3 交易账务 | PATCH /api/v1/transactions/{transactionId} | 编辑既有交易 |
 | M3 交易账务 | DELETE /api/v1/transactions/{transactionId} | 删除交易及规则要求一并删除的退款 |
@@ -139,8 +139,8 @@
 | M4 导入与来源证据 | POST /api/v1/imports | 上传微信/支付宝官方账单 |
 | M4 导入与来源证据 | GET /api/v1/imports/{batchId} | 查看一次导入的结果与必要的待处理记录 |
 | M4 导入与来源证据 | POST /api/v1/imports/{batchId}/resolutions | 处理确实无法自动唯一匹配的来源记录 |
-| M4 导入与来源证据 | GET /api/v1/source-account-mappings?platform=... | 查看已保存的来源账户映射 |
-| M4 导入与来源证据 | PUT /api/v1/source-account-mappings | 新建或更新来源账户映射 |
+| M4 导入与来源证据 | GET /api/v1/source-payment-method-mappings?platform=... | 查看行级支付渠道映射 |
+| M4 导入与来源证据 | PUT /api/v1/source-payment-method-mappings | 新建或更新行级支付渠道映射 |
 
 这些是业务操作接口。底层的 AccountFundMovement 不提供任意新增、编辑或删除接口；资金变动由账户初始状态、交易、退款、转账、导入或手动分配调整等受控操作生成。
 
@@ -191,7 +191,7 @@ GET /api/v1/overview?month=2026-10
 - visible_total_minor 是当前用户有权查看的资金份额合计，不代表这些资金全部属于当前用户。
 - personal_spending 与 budget 只计算当前用户自己的消费，不混入对象消费。
 - 退款关联原消费后，修正原消费月份的花销。
-- 日均花销、变化率和本月预计花销按业务规则 v2.6 的公式计算。
+- 日均花销、变化率和本月预计花销按业务规则 v2.7 的公式计算。
 - 超支时 status=over_budget、over_budget_minor 为正数，前端显示红色“已超支 ¥X”；未超支时显示剩余额度。
 - 当上月日均为零时的特殊展示已被业务规则列为非阻塞边界，不在本契约中增加新业务流程。
 
