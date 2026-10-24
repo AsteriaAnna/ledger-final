@@ -144,3 +144,9 @@ flowchart TB
 入站HTTP命令不接受派生accounting_semantics；M3从合法type计算。参考脚本当前账户/来源ID均为虚构映射；真实文件只能提供证据，不能证明真实用户权限或线上余额。
 
 渠道映射闭环：Evidence.canonical_method_keys保留全部规范键；Candidate.canonical_method_key用于单账户，from_canonical_method_key/to_canonical_method_key用于已明确内部转账两端，未明确角色/账户线索时为null。客户端从导入结果取键，结合listAccounts让本人选择Account，再putMapping并resolveImport(resume)。文件头原始信息在本人ImportBatch.source_metadata展示，不能成为客户端授权依据。
+
+## 9. 已选持久化方式：共享PG的HTTP API与RPC
+
+共享PG访问采用HTTP API + RPC。应用用例协调的“同一提交边界”在一次受限写RPC中落地，不是在Node中开TCP连接，也不是各模块各发一次HTTP保存。M2/M3/M4的数据所有权不因此合并：用例收集各模块计划，持久化适配器一次提交，RPC内完成必要的版本/权限/非负与守恒检查和原子写入；跨网络读取到的状态必须和版本一致，过期计划拒绝提交。幂等完成结果与账务同事务保存。
+
+M2资金规则仍在TypeScript中只维护一份；RPC不重新实现扣减/回补算法，不处理Excel或业务页面。它属于基础设施边界，不增加M6，也不暴露客户端任意SQL执行入口。浏览器不能直接调用内部账务RPC；SQL函数的调用角色、表权限和RLS必须配套验证。M5仍独立读取正式结果。实现细节及最小验证见[实施计划§7](IMPLEMENTATION_PLAN.md#7-当前选定技术组合与最小验证)。

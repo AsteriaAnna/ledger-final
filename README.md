@@ -29,4 +29,4 @@ M1–M5始终是业务模块，不是里程碑编号。每次实现任务限定�
 
 全部24个公开操作的职责、异常、副作用、边界与调用环节已写入六份核心文档；严格结构统一维护于[openapi.yaml](openapi.yaml)。产品功能包含全部operationId的Mermaid，模块边界包含真实字段到统一账务的数据流。采用单库事务、必要POST幂等及资源版本比较；当前仍未实现生产API，不新增过程报告。
 
-当前业务与24个API冻结于`524f2da`，下一阶段只做技术选型与最小验证。国内Web优先、多端共用云端账本；候选比较、CloudBase套餐限制、成本与待验证事项集中见[实施计划§7](docs/IMPLEMENTATION_PLAN.md#7-技术选型依据与候选结论)，尚未选定付费数据库实例或部署。
+当前业务与24个API冻结于`524f2da`。开发起点已选定：React + TypeScript + Vite；Node.js + Express模块化单体；现有CloudBase共享PostgreSQL，通过HTTP API + RPC访问；CloudBase Auth；云托管与Web静态托管。单元/API契约/数据库集成验证各自检查对应边界。理由、原子提交、费用与备份待验证项见[实施计划§7](docs/IMPLEMENTATION_PLAN.md#7-当前选定技术组合与最小验证)。当前尚未部署，不需要兼容旧系统或默认升级数据库。
