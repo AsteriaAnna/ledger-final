@@ -1,11 +1,11 @@
 # 星账｜API 契约
 
-**版本：** v0.2  
+**版本：** v0.3  
 **阶段：** API 契约设计稿  
 **状态：** 候选契约，待审阅  
-**业务基线：** [核心业务规则 v2.6（已冻结）](BUSINESS_RULES_DISCUSSION.md)  
-**数据基线：** [逻辑数据模型 v0.3](LOGICAL_DATA_MODEL.md)  
-**产品基线：** [产品功能地图 v0.2](PRODUCT_FUNCTION_MAP.md)
+**业务基线：** [核心业务规则 v2.7（已冻结）](BUSINESS_RULES_DISCUSSION.md)  
+**数据基线：** [逻辑数据模型 v0.4](LOGICAL_DATA_MODEL.md)  
+**产品基线：** [产品功能地图 v0.3](PRODUCT_FUNCTION_MAP.md)
 
 本文把已冻结的业务规则和逻辑数据模型转换为前后端共同遵守的接口约定。接口路径与 HTTP/JSON 形式是当前建议，不代表已确定技术栈、数据库、部署方式或认证供应商。
 
@@ -443,7 +443,7 @@ POST /api/v1/transactions
 6. 在同一原子操作中验证账户余额、资金份额、转账两端和退款关联约束。
 7. 返回正式保存结果与必要的存款使用提醒。
 
-退款还有两个需要在实现前明确的边界：退款到账账户可能不同于原消费账户；原消费也可能是没有现金账户扣减份额的 credit_purchase。现有冻结规则和逻辑模型尚未完整定义这两种组合的资金份额恢复方式。实现前必须补充对应规则，不得静默把退款当作普通收入，也不得擅自将资金变动记回错误账户。
+退款边界已由业务规则 v2.7 冻结：退款到账账户与原消费账户相同，首期不支持信用消费退款。官方退款必须由平台专用解析器关联唯一原消费；若解析器无法建立该关系，整行作为导入错误处理，不创建退款交易、不按普通收入入账。
 
 响应示例：
 
@@ -539,11 +539,11 @@ POST /api/v1/imports
 
 请求使用 multipart/form-data：
 
-- platform：wechat 或 alipay
-- file：官方导出文件
+- file：微信或支付宝官方导出文件
+- source_account_profile_id：可选；若文件头可唯一匹配已有来源账户档案则自动使用，否则仅在存在多个候选档案时要求用户选择
 - Header：Idempotency-Key
 
-V1 只支持微信和支付宝官方账单文件；截图识别不属于此接口。
+平台由固定的官方文件结构和表头自动识别，不要求用户每次手动选择微信或支付宝。V1 只支持微信和支付宝官方账单文件；截图识别不属于此接口。
 
 响应示例：
 
@@ -557,14 +557,23 @@ V1 只支持微信和支付宝官方账单文件；截图识别不属于此接�
       "transactions_created": 120,
       "transactions_linked": 8,
       "duplicate_sources_ignored": 3,
-      "source_records_needing_review": 1,
+      "source_records_needing_review": 0,
       "manual_transactions_not_found": 4,
+      "reconciliation_items_rechecked": 2,
       "failed_rows": 0
     },
     "coverage": {
-      "from": "2026-02-01",
-      "to": "2026-04-30",
+      "from": "2026-02-01T00:00:00+08:00",
+      "to": "2026-04-30T23:59:59+08:00",
+      "export_type": "all_transactions",
+      "declared_record_count": 169,
+      "parsed_record_count": 169,
       "complete": true
+    },
+    "source_account_profile": {
+      "id": "source-account-profile-id",
+      "platform": "wechat",
+      "display_label": "微信账号"
     },
     "review_items": [
       {"source_record_id": "source-record-id", "reason_code": "AMBIGUOUS_MATCH"}
@@ -582,29 +591,31 @@ V1 只支持微信和支付宝官方账单文件；截图识别不属于此接�
 - needs_review：批次已处理，但存在待处理来源记录或待用户确认的手动交易核对项。
 - failed：文件无法安全解析或批次无法完成；不得报告为成功入账。
 
-`transactions_created`、`transactions_linked` 和 `duplicate_sources_ignored` 是互斥计数。`source_records_needing_review` 统计官方文件中的来源行待处理项；`manual_transactions_not_found` 统计本批次生成的未匹配手动交易核对项（无论之后是否已确认），两者不可合并。当前待确认数量以每个 reconciliation item 的 status 为准。`coverage.complete` 为 false 或覆盖范围无法确定时，不得生成“未找到来源”的核对项。解析失败行、待处理记录不能伪装成已入账交易。
+`transactions_created`、`transactions_linked` 和 `duplicate_sources_ignored` 是互斥计数。`source_records_needing_review` 只统计非退款官方来源行的待处理项；`manual_transactions_not_found` 统计本批次新建的核对项；`reconciliation_items_rechecked` 统计本批次重新检查到的既有核对项，不会生成重复提示。`coverage.complete` 只有在导出类型为全量、起止时间可解析、声明记录数与实际解析行数一致且无解析失败时才能为 true；否则不得生成“未找到来源”的核对项。
 
 ### 7.2 导入处理约束
 
 后端按以下顺序处理：
 
-1. 校验文件、来源平台和文件格式。
-2. 创建 ImportBatch，并保存必要的 SourceObservation 原始证据。
-3. 解析与标准化来源字段。
-4. 根据来源平台、来源账户和可靠外部 ID 识别 SourceRecord。
-5. 匹配已有手动交易与已知来源。
-6. 对确认的新交易调用统一交易处理逻辑；不直接写余额。
-7. 对交易日期早于账户起始日期的记录保留交易与账户关联，但不影响该账户余额。
-8. 对来源行完成匹配/创建后，识别本次导入是否具有可确认的完整覆盖范围及来源账户映射。
-9. 对覆盖范围内应出现在该来源、但未匹配到官方来源的手动交易，创建 ImportReconciliationItem；核对项不产生账务影响。若覆盖范围或账户映射不确定，则跳过“未找到来源”判断。
+1. 从固定文件结构自动识别微信或支付宝；读取导出账户元数据、导出时间、起止范围、导出类型与声明记录数。
+2. 校验表头、日期范围、全量导出标记、声明行数和实际解析行数；不完整文件仍可报告解析结果，但不得执行缺失手动交易核对。
+3. 解析每行官方交易单号，按 `(source_account_profile_id, official_transaction_id)` 查找或创建 SourceRecord；商户订单号不作为唯一主键。
+4. 为每条已识别来源保存 SourceObservation。若重叠导出中同一交易的状态不同，保留两次观察，并按导出时间较新的观察更新当前来源状态；旧文件不得覆盖新状态。
+5. 按平台规则解析交易语义和唯一退款原消费；退款到账账户必须与原消费账户相同。若无法建立唯一退款关系，该行失败，不创建退款交易。
+6. 匹配已有来源与手动交易；已存在来源不重复入账，匹配到已有手动交易时关联来源，不重复创建交易。
+7. 对新交易调用统一交易处理逻辑；不直接写余额。对起始日前交易保留事实但不改变该账户余额。
+8. 只有完整覆盖范围和来源账户档案/行级渠道映射都明确时，才核对范围内未匹配到官方来源的手动交易。
+9. 按 `(source_account_profile_id, transaction_id)` 查找 ImportReconciliationItem：新项进入本批次提示；已存在项仅更新最近检查批次和检查时间，不重复创建/提示。
 10. 保存来源关联、核对项、处理结果和汇总计数。
 
 重复导入约束：
 
 - 同一幂等请求不能重复执行。
 - 相同文件指纹可识别为已处理批次，避免重复入账。
-- 有可靠稳定 ID 时使用来源平台、来源账户和外部 ID 识别同一来源。
-- 没有稳定 ID 时，不能只因金额、日期和商户相同就静默合并。
+- 首选稳定身份为来源账户档案 + 官方交易单号；商户订单号可为空或重复，不作唯一键。
+- 当前真实重叠样本中，微信 60/60、支付宝 83/83 条重叠记录的官方交易单号一致；同一来源状态可随导出时间更新，但不重复创建交易。
+- 不同文件日期范围重叠时，仍按稳定交易单号去重；不能只按文件指纹去重。
+- 仅当平台文件缺失交易单号且无法证明唯一身份时，才进入来源数据错误/待修复流程，不使用金额、日期和商户相同作为静默合并依据。
 - 删除交易后再次导入，允许重新创建交易；历史 SourceRecord 不能永久阻止重导入。
 - 不静默覆盖用户手动修正的重要字段；不确定时保留证据并要求必要的人工处理。
 
@@ -641,41 +652,58 @@ POST /api/v1/imports/{batchId}/resolutions
 
 - `link_existing_transaction` 只用于“该官方来源行本身就是这笔已有交易”的情况，必须验证交易属于当前用户，且没有与另一个不兼容的来源身份冲突。
 - `create_transaction` 只用于可独立建立的普通收入、支出或转账来源，通过统一交易规则创建正式交易；不得绕过资金分配和账户起始日期规则。
-- 对识别为退款但原消费尚未唯一确认的来源行，不能使用 `link_existing_transaction` 把退款来源直接连到原消费。应在实现退款导入前补齐单独的“确认退款原消费并创建来源退款交易”解析动作；该动作必须同时建立 SourceRecord → 退款 Transaction 和退款 Transaction → 原消费两条不同关系。当前版本不冻结该动作的最终请求字段。
+- 退款不走通用的人工 resolution；由平台专用解析器按官方规则唯一关联原消费并自动调用统一交易用例创建退款交易。若无法唯一关联，记录 `REFUND_ORIGINAL_NOT_RESOLVED` 导入错误并保留原始证据，不创建交易，也不把它作为用户日常选择原消费的待处理项。
 - 处理成功后更新 SourceRecord 关联与 ImportBatch 计数。
 - 同一来源记录不能因重复提交 resolution 而重复创建交易。
 
-### 7.4.1 确认未匹配手动交易
+### 7.4.1 处理未匹配手动交易核对项
 
 POST /api/v1/imports/{batchId}/reconciliation-reviews
 
-候选请求：
+删除手动交易：
 
 ~~~json
 {
   "reconciliation_item_id": "reconciliation-item-id",
-  "action": "acknowledge_not_found"
+  "action": "delete_manual_transaction"
 }
 ~~~
 
-- 该操作只确认用户已查看“本次完整覆盖范围内未找到对应官方来源”的提示，不修改、删除或覆盖原手动交易。
-- 如用户发现原交易信息错误，仍通过普通账单编辑/删除接口处理。
-- 必须验证核对项、导入批次和交易都属于当前用户；重复确认应幂等。
-- 本动作只处理手动交易未匹配核对项，不用于解析官方退款来源。
-- 不提供静默丢弃真实有效交易的默认操作；若来源状态是失败、关闭或非交易记录，应由解析规则识别，而不是要求用户将其当作正常交易入账。
+保留并标记已核对：
 
-### 7.5 来源账户映射
+~~~json
+{
+  "reconciliation_item_id": "reconciliation-item-id",
+  "action": "keep_manual"
+}
+~~~
 
-GET /api/v1/source-account-mappings?platform=wechat
+- `delete_manual_transaction` 调用标准交易删除用例，并与核对项关闭/删除在同一原子操作中完成；不得只删除一侧。
+- `keep_manual` 将状态设为 `kept_manual`，不修改交易事实、账户余额或资金份额。
+- 后续官方来源若成功匹配到该手动交易，关联来源并将核对项设为 `matched_to_source`。
+- 必须验证核对项、来源档案和交易都属于当前用户；重复请求应幂等。
+- 重叠导入不能为同一来源档案与交易创建第二个核对项或重复提示。
 
-PUT /api/v1/source-account-mappings
+### 7.5 来源账户档案与支付渠道映射
+
+来源账户档案代表导出文件的微信/支付宝账号；行级支付渠道映射代表交易使用的零钱、银行卡、花呗或亲情卡等方式，两者不能混为一个字段。
+
+- 导入时优先自动匹配已有来源档案。支付宝账户头标识可用于档案指纹匹配；微信文件头目前只有昵称，昵称仅作展示/辅助识别，不作为不可变身份 ID。
+- 若只有一个当前用户的同平台档案，可复用该档案；存在多个候选且无法唯一识别时，才要求用户选择。首次导入创建档案，不要求每次导入重新确认。
+- `ImportBatch` 必须保存来源档案 ID、导出账户元数据快照、导出时间、起止时间、导出类型、声明行数、实际解析行数和完整性判定。
+
+### 7.6 行级支付渠道映射
+
+GET /api/v1/source-payment-method-mappings?platform=wechat
+
+PUT /api/v1/source-payment-method-mappings
 
 请求示例：
 
 ~~~json
 {
   "platform": "wechat",
-  "source_account_key": "微信零钱",
+  "source_payment_method_key": "零钱",
   "mapping_kind": "managed_account",
   "account_id": "account-id"
 }
@@ -686,15 +714,15 @@ PUT /api/v1/source-account-mappings
 ~~~json
 {
   "platform": "alipay",
-  "source_account_key": "花呗",
+  "source_payment_method_key": "花呗",
   "mapping_kind": "credit_source"
 }
 ~~~
 
-- mapping_kind=managed_account 必须提供当前用户有权编辑的 account_id。
-- mapping_kind=credit_source 不创建负债账户，也不需要虚构账户 ID。
-- 映射仅帮助解析后续官方文件中的支付来源，不直接产生交易或资金变动。
-- 来源字段如何识别为收入、消费、退款、转账或信用还款，必须依据真实官方字段和已确认的确定性规则；映射名称本身不能替代交易语义判断。
+- `managed_account` 必须提供当前用户有权编辑的 `account_id`。
+- `credit_source` 不创建负债账户，也不需要虚构账户 ID。
+- 映射仅帮助解析每行官方文件中的支付渠道，不直接产生交易或资金变动。
+- 支付渠道名称本身不能替代交易语义判断。
 
 ## 8. M1：关系绑定
 
@@ -758,6 +786,9 @@ POST /api/v1/relationship/binding
 | 422 | INVALID_REFUND_LINK | 原交易不存在、不属于当前用户或不是有效原消费 |
 | 422 | REFUND_REQUIRES_OFFICIAL_SOURCE | 手动创建接口试图创建退款；退款必须来自官方账单导入 |
 | 422 | UNSUPPORTED_SOURCE_FILE | 文件格式或平台不支持 |
+| 422 | IMPORT_COVERAGE_INCOMPLETE | 文件范围、声明行数或解析完整性不足；不得生成缺失手动交易核对项 |
+| 422 | SOURCE_PROFILE_SELECTION_REQUIRED | 多个来源账户档案均可能对应当前文件，需要用户选择一次 |
+| 422 | REFUND_ORIGINAL_NOT_RESOLVED | 退款行未能按平台规则唯一关联原消费；不创建退款交易，保留原始证据并报告该行失败 |
 | 422 | SOURCE_MAPPING_REQUIRED | 当前来源无法按既有映射安全处理 |
 | 500 | INTERNAL_ERROR | 未预期的服务端错误；返回 request_id，不暴露内部堆栈 |
 
@@ -824,7 +855,7 @@ POST /api/v1/relationship/binding
 
 ### 当前状态与后续顺序
 
-本版同步业务规则 v2.6：手动记账不创建退款；退款由官方导入创建；导入后未匹配手动交易单独生成核对项并由用户确认。退款来源的人工解析动作、退款到账账户不同和信用消费退款等边界仍需在 M4/相关实现前补齐。
+本版同步业务规则 v2.7：手动记账不创建退款；官方退款按平台规则关联唯一原消费且到账账户相同，首期不支持信用消费退款；官方文件覆盖范围从元数据和行数校验；导入核对项跨批次唯一，用户可删除手动交易或保留并标记已核对。
 
 工程模块边界、实施任务与路线图已分别记录在 ENGINEERING_MODULE_BOUNDARIES.md、IMPLEMENTATION_PLAN.md 和 ROADMAP.md。
 
