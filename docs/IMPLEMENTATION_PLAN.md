@@ -18,11 +18,11 @@ M1–M5始终指业务模块。以下工程阶段用Phase 0–7编号，不与�
 
 ### 2.2 八个阶段与退出条件
 
-阶段的操作、验证、产物和接收标准统一维护于[阶段交付与依赖P0–P7](PHASE_DELIVERIES_AND_DEPENDENCIES.md#p0)。本文件§2.6记录各阶段是否实际完成。
+阶段的目录位置、施工顺序、功能链路、验证、产物和接收标准统一维护于[具体开发计划P0–P7](PHASE_DELIVERIES_AND_DEPENDENCIES.md#3-阶段先后与当前环节)。本文件§2.6记录各阶段是否实际完成。
 
 ### 2.3 阶段依赖与硬门槛
 
-各种依赖的供给方、领取检查和阻塞点见[依赖登记规则](PHASE_DELIVERIES_AND_DEPENDENCIES.md#2-依赖登记规则)，阶段上下游见[Mermaid阶段关系](PHASE_DELIVERIES_AND_DEPENDENCIES.md#3-阶段关系)。
+各种依赖的供给方、领取检查和阻塞点见[依赖领取](PHASE_DELIVERIES_AND_DEPENDENCIES.md#2-依赖怎样领取)，阶段上下游见[Mermaid阶段关系](PHASE_DELIVERIES_AND_DEPENDENCIES.md#3-阶段先后与当前环节)。
 
 ### 2.4 24个公开API的实现归属
 
