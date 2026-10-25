@@ -18,15 +18,15 @@ M1–M5始终指业务模块。以下工程阶段用Phase 0–7编号，不与�
 
 ### 2.2 八个阶段与退出条件
 
-阶段的目录位置、施工顺序、功能链路、验证、产物和接收标准统一维护于[具体开发计划P0–P7](PHASE_DELIVERIES_AND_DEPENDENCIES.md#3-阶段先后与当前环节)。本文件§2.6记录各阶段是否实际完成。
+阶段的目录位置、施工顺序、功能链路、验证、产物和接收标准统一维护于[具体开发计划P0–P7](PHASE_DELIVERIES_AND_DEPENDENCIES.md#3-阶段依赖与当前环节)。本文件§2.6记录各阶段是否实际完成。
 
 ### 2.3 阶段依赖与硬门槛
 
-各种依赖的供给方、领取检查和阻塞点见[依赖领取](PHASE_DELIVERIES_AND_DEPENDENCIES.md#2-依赖怎样领取)，阶段上下游见[Mermaid阶段关系](PHASE_DELIVERIES_AND_DEPENDENCIES.md#3-阶段先后与当前环节)。
+各种依赖的供给方、领取检查和阻塞点见[依赖领取](PHASE_DELIVERIES_AND_DEPENDENCIES.md#2-统一施工命令日志和测试约定)，阶段上下游见[Mermaid阶段关系](PHASE_DELIVERIES_AND_DEPENDENCIES.md#3-阶段依赖与当前环节)。
 
 ### 2.4 24个公开API的实现归属
 
-唯一分配表见[公开API交付归属](PHASE_DELIVERIES_AND_DEPENDENCIES.md#4-公开api交付归属)，接口结构和行为仍以API契约为准。
+唯一分配清单见[公开API交付归属](PHASE_DELIVERIES_AND_DEPENDENCIES.md#4-公开api交付归属)，接口结构和行为仍以API契约为准。
 
 ### 2.5 文档与目标工程结构
 
@@ -50,7 +50,7 @@ M1–M5始终指业务模块。以下工程阶段用Phase 0–7编号，不与�
 | package.json及锁文件 | 统一启动/构建/检查入口，Phase 2 |
 | apps/web、apps/api | Web与模块化后端，Phase 2；M1–M5在API内部，不拆五个服务 |
 | packages/contracts | 契约生成类型/必要共享内容，在Phase 2确认确实复用后建立 |
-| db/migrations | 结构、RPC函数及授权的有序迁移；Phase 1最小验证→Phase 2正式入口→相关业务阶段扩展 |
+| experiments/p1/migrations、db/migrations | P1实验专用SQL在前者；P2将已验证的可复用结构、RPC和授权接入后者，后续业务迁移有序扩展 |
 | tests/contract、integration、e2e | 到对应验证首次需要时建立；纯函数单元测试可与模块同目录 |
 | docs/tasks、scripts | 写具体任务卡或出现可复用命令时再建立；不迁移现有参考实验来冒充生产代码 |
 
