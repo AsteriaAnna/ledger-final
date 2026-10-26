@@ -1,0 +1,22 @@
+{
+  "name": "@ledger/api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npm run build && npm run start",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "start": "node --env-file-if-exists=.env.local dist/server.js",
+    "test": "tsc -p tsconfig.test.json && node --test test-dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@cloudbase/js-sdk": "3.10.4",
+    "express": "5.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.4",
+    "@types/node": "24.9.1",
+    "typescript": "5.9.3"
+  }
+}
