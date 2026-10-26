@@ -1,8 +1,8 @@
 # 星账｜业务、交互与工程总设计暨施工说明
 
-本次确定的深度：功能、页面交互、内部函数、物理数据结构、RPC输入输出、施工顺序和测试预期；视觉配色与精细样式后置。本文是待实施设计，当前P0进行中，尚无正式应用。实际完成状态只登记在[实施计划§2.6](IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)。
+本文记录已确认的业务/接口引用和一份详细的实现候选，包括页面交互、内部函数、物理结构、RPC、施工顺序及测试预期；当前P0进行中，尚无正式应用。§4–6及§7.1的具体文件、函数签名、表和安装命令尚未在本项目真实平台验证，首次使用时按实测和现有业务/API契约定稿，不将本文的假设当成已实现能力。实际进度与当前增量只见[实施计划§2.6](IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)。
 
-**三个层次分别阅读：**§1只回答“业务拥有哪些功能”；§2–3回答“用户操作后发生什么”；§4–6回答“代码与数据怎样实现”；§7回答“按什么顺序施工”；§8规定证据与测试。业务以[业务规则](BUSINESS_RULES_DISCUSSION.md)为准，页面依据[产品功能](PRODUCT_FUNCTION_MAP.md)，外部结构以[OpenAPI](../openapi.yaml)和[API契约](API_CONTRACT.md)为准，模块与实体分别遵守[模块边界](ENGINEERING_MODULE_BOUNDARIES.md)和[逻辑模型](LOGICAL_DATA_MODEL.md)。本文补内部实现决定，不改变24个公开操作与冻结业务。
+**按层阅读：**§1是业务与功能归属索引；§2–3是用户交互及业务流程的设计候选；§4–6是尚待平台与实际代码验证的内部施工候选；§7是阶段门槛与建议顺序；§8是独立验收样例。业务以[业务规则](BUSINESS_RULES_DISCUSSION.md)为准，页面依据[产品功能](PRODUCT_FUNCTION_MAP.md)，外部结构以[OpenAPI](../openapi.yaml)和[API契约](API_CONTRACT.md)为准，模块与实体分别遵守[模块边界](ENGINEERING_MODULE_BOUNDARIES.md)和[逻辑模型](LOGICAL_DATA_MODEL.md)。本文不是这些文档的第二份规则正文。
 
 ## 1. 业务与功能归属全景
 
@@ -529,7 +529,7 @@ RPC只防护计划合法性和保存一致性，扣减/回补算法只在TypeScr
 **固定读写后验：**创建/编辑/删除交易后重新GET交易（删除应404）、账户及受影响月份；提交成功不依赖M5查询成功。所有新增写入口必须更新同一账户控制版本；映射类型兼容检查与账户资料变更使用共同账户锁。
 ## 7. 开发计划：箭头只表示施工依赖
 
-下图只有P阶段。功能已在§1定义，具体实现已在§2–6锁定，下面的阶段步骤负责把它们按可运行顺序交付。实线是开工依赖，虚线是整体验收依赖。当前P0，后续节点均为计划。
+下图只有P阶段。功能归属在§1，§2–6是实现候选；阶段节点表示能力门槛，实际开发按[当前增量](IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)交付完整用户链路，必要的前后端与数据库工作可同轮完成。实线是依赖，虚线是整体验收依赖；当前P0，后续节点均为计划。
 
 ```mermaid
 flowchart TB
@@ -543,9 +543,9 @@ flowchart TB
   P6 --> P7["P7：正式发布与恢复"]
 ```
 
-### 7.1 固定安装和命令
+### 7.1 候选安装和命令
 
-Node固定24系列，P0记录实际小版本和npm版本；首次安装解析到的依赖版本用`--save-exact`写清单并提交唯一根锁文件，之后全新检出只运行npm ci。创建根`package.json`（private=true、workspaces为apps/web、apps/api、packages/contracts）、两个应用清单（private=true，API type=module），以及contracts清单后运行：
+Node 24系列及下列依赖/命令是工程候选；P1/P2核对平台运行时、安装可用性与所需能力后锁定实际版本和唯一根锁文件，新检出再使用npm ci。首次建立工程时可创建根`package.json`（private=true、workspaces为apps/web、apps/api、packages/contracts）及对应应用清单，再运行选定命令：
 
 ```bash
 npm install --save-exact --workspace apps/web react react-dom lossless-json
@@ -589,12 +589,11 @@ contracts workspace的build/typecheck只校验生成声明和类型辅助；API 
 
 ## P0
 
-**交付目标：**指定提交、唯一设计入口与可领取的P1运行条件。业务范围是全项目设计定位，尚不实现F功能。
+**交付目标：**明确设计权威、隔离环境输入与可领取的P1运行条件；尚不把F功能标记为已实现。
 
-1. **P0.1 固定版本。**运行git status --short --branch、git rev-parse HEAD；在指定基线上建阶段分支，保护已有改动；README指向本说明和实施计划进度。根AGENTS记录按步骤执行、明确路径提交、遇失败保留现场并报告。交付D1。
-2. **P0.2 整理资料入口。**保留六份原入口及旧章节锚点；API通用/M1–M5正文分别定位到docs/api/COMMON.md、M1_IDENTITY.md、M2_ACCOUNTS.md、M3_TRANSACTIONS.md、M4_IMPORTS.md、M5_OVERVIEW.md，官方字段正文定位docs/import/OFFICIAL_FIELDS.md。原文逐段核对、OpenAPI不改、链接可达。交付D2；本文引用原入口继续有效。
-3. **P0.3 登记实值。**实施计划增加P1输入登记：源码SHA、node/npm版本、隔离CloudBase环境及地域、PG HTTP/RPC地址、SQL部署管理途径、后端受限角色、两名Auth身份、私有测试文件、私有导出和独立恢复目标、托管/日志权限、允许的资源费用范围。待提供项写首次阻塞的P1步骤，不能把未知填为可用。交付D3。
-4. **P0.4 核对可开工。**只核对资料与授权证据、node/npm版本、输入定位；确认P1.1将运行的环境与管理/受限角色不同。登记产物SHA及文档检查结果，D4交接P1。真实建表/RPC/托管实证在P1进行。
+1. **P0.1 固定版本和权威。**记录分支、HEAD、工作区；沿README逐个确认业务、产品、逻辑模型、OpenAPI及模块边界的职责。只把会影响下一轮开发的矛盾落实到主责文件并修正引用。必要时建立短AGENTS，明确Git隔离和遇到业务决策时的报告方式。
+2. **P0.2 领取P1输入。**在实施计划当前增量记录已能核实的隔离CloudBase环境、PG HTTP/RPC与SQL管理入口、受限身份、两名测试身份、私有样本、独立恢复目标和费用/托管权限。缺失实值仅注明首次使用动作与需要的来源，不将猜测写为可用。已有文档按实际读取成本决定是否拆分，不以搬移章节作为P1前置门槛。
+3. **P0.3 确认可开工。**从仓库检出与非敏感环境证据复核P1实验目标，记录已满足与缺失的输入、文档检查及提交SHA。P1的真实事务、鉴权、部署与恢复由实验结果验收，不以P0文字替代。
 
 ## P1
 
@@ -612,7 +611,7 @@ contracts workspace的build/typecheck只校验生成声明和类型辅助；API 
 
 **交付目标：**安装后可运行同一Web/API，类型/契约、日志、迁移和测试有可执行入口。建立后续所有功能的代码容器。
 
-1. **P2.1 初始化工程。**创建§7.1清单并运行安装命令；创建API app/server/tsconfig，Web index.html/main/App/router/vite.config/tsconfig，contracts生成器。记录解析版本；运行contracts:generate、typecheck、build和npm ls --all。缺少工作区脚本不得使用--if-present隐藏。
+1. **P2.1 初始化工程。**按P1实证结果选定§7.1所需清单并运行安装命令；创建API app/server/tsconfig，Web index.html/main/App/router/vite.config/tsconfig，contracts生成器。记录解析版本；运行contracts:generate、typecheck、build和npm ls --all。缺少工作区脚本不得使用--if-present隐藏。
 2. **P2.2 边界与日志。**实现http/auth、validation、errors，infrastructure/auth/database/log；按§4生成输入输出校验，固定错误正文、ETag和request_id头。建立`/healthz`进程探针，仍只有24个业务API。测试金额整数、null/省略/false、额外字段、引用联合、超大整数无损、错误脱敏。V06。
 3. **P2.3 数据迁移。**实现migrate脚本的`--target test --dry-run`和实际执行；依据P1管理能力部署`001_runtime.sql`（受限角色、迁移登记；依赖User的requests/steps在002_identity创建）。检查SHA，重复执行不重复建对象，已应用文件变动应失败；实验专用SQL留experiments，正式迁移不带注错入口。V07。
 4. **P2.4 测试与页面壳。**实现run-tests/verify-cloud及测试清单；Playwright配置desktop-chromium/mobile-webkit；App提供§2五导航与Hash恢复，api/client会话/错误/意图状态可测。尚未交付页面显示真实开发状态，不返回假数据。V08。

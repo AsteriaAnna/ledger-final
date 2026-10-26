@@ -32,4 +32,4 @@ M1–M5始终是业务模块，不是里程碑编号。每次实现任务限定�
 
 整体工程路线、阶段交付、各类依赖与24个API归属统一见[阶段交付与依赖](docs/PHASE_DELIVERIES_AND_DEPENDENCIES.md)。实际进度统一见[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)。
 
-当前已编写[P0工程准备说明](docs/PHASE_DELIVERIES_AND_DEPENDENCIES.md#p0)，由用户从[P0-T01](docs/tasks/P0-T01_EXECUTION_BASELINE.md)启动。任务卡包含指定资料、操作、允许改动、测试和暂停汇报规则。原六份设计入口保留；P0-T02执行时按卡拆出API模块与官方字段正文并更新引用。各卡的产物是否已生成，以实施计划的验收记录为准。
+当前从[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)领取下一步工作。[阶段设计](docs/PHASE_DELIVERIES_AND_DEPENDENCIES.md)中的内部函数、物理表、RPC及安装步骤是待实际验证的施工候选，不替代业务规则与OpenAPI。先核对隔离环境能力，再交付第一条实际页面→API→数据库→刷新链路；每次只细化当前可交付的增量。旧P0逐卡整理方案未执行，已从当前工作入口撤下。
