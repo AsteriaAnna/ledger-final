@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --configLoader runner --host 127.0.0.1",
+    "preview": "vite preview --configLoader runner --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build --configLoader runner"
   },
