@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { allocateExpense, parseAccount, parseAccountPatch, parseExpense, parseExpensePatch,
-  type Share } from '../src/domain/ledger.js';
+  parseFundAdjustment, type Share } from '../src/domain/ledger.js';
 
 test('opening allocations must equal the initial balance and cannot repeat a share', () => {
   const base = {
@@ -37,4 +37,13 @@ test('maintenance patches reject forged balances and invalid money', () => {
   assert.deepEqual(parseExpensePatch({ amount_minor: 1500, note: '' }), { amount_minor: 1500, note: '' });
   assert.throws(() => parseExpensePatch({ amount_minor: 1.5 }));
   assert.throws(() => parseExpensePatch({ source_account_profile_id: 'forged' }));
+});
+
+test('fund adjustment accepts two distinct self shares and positive integer cents', () => {
+  const input = { from: { fund_owner: 'self', fund_type: 'liquid' },
+    to: { fund_owner: 'self', fund_type: 'savings' }, amount_minor: 1250 };
+  assert.equal(parseFundAdjustment(input).amount_minor, 1250);
+  assert.throws(() => parseFundAdjustment({ ...input, amount_minor: 0 }));
+  assert.throws(() => parseFundAdjustment({ ...input, to: input.from }));
+  assert.throws(() => parseFundAdjustment({ ...input, from: { fund_owner: 'partner', fund_type: 'savings' } }));
 });

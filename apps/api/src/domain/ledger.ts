@@ -106,6 +106,24 @@ export function parseAccountPatch(input: unknown): AccountPatch {
   return patch;
 }
 
+export type FundAdjustment = {
+  from: { fund_owner: 'self'; fund_type: 'liquid' | 'savings' };
+  to: { fund_owner: 'self'; fund_type: 'liquid' | 'savings' };
+  amount_minor: number;
+};
+
+export function parseFundAdjustment(input: unknown): FundAdjustment {
+  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '资金调整内容不合法。'); };
+  if (!object(input) || !allowed(input, ['from', 'to', 'amount_minor']) ||
+    !object(input.from) || !object(input.to) ||
+    !allowed(input.from, ['fund_owner', 'fund_type']) || !allowed(input.to, ['fund_owner', 'fund_type']) ||
+    input.from.fund_owner !== 'self' || input.to.fund_owner !== 'self' ||
+    (input.from.fund_type !== 'liquid' && input.from.fund_type !== 'savings') ||
+    (input.to.fund_type !== 'liquid' && input.to.fund_type !== 'savings') ||
+    input.from.fund_type === input.to.fund_type || !cents(input.amount_minor)) return bad();
+  return input as FundAdjustment;
+}
+
 export type ExpensePatch = {
   amount_minor?: number; occurred_at?: string; account_id?: string;
   category_code?: string; merchant?: string; note?: string;

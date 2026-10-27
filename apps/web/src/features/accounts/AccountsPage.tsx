@@ -17,6 +17,7 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
   const [liquid, setLiquid] = useState('0.00');
   const [savings, setSavings] = useState('0.00');
   const [editing, setEditing] = useState<{ account: Account; name: string; type: string; custodian: 'self' | 'partner' } | null>(null);
+  const [adjusting, setAdjusting] = useState<{ account: Account; from: 'liquid' | 'savings'; amount: string } | null>(null);
 
   useEffect(() => {
     if (view !== 'partner' || !bound) return;
@@ -62,6 +63,25 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
     finally { setBusy(false); }
   }
 
+  async function saveAdjustment(event: React.FormEvent) {
+    event.preventDefault();
+    if (!adjusting) return;
+    setBusy(true); onMessage('');
+    try {
+      const amount = minor(adjusting.amount);
+      if (amount <= 0) throw new Error('调整金额必须大于零。');
+      await createWithKey<Account>(session, `/accounts/${adjusting.account.id}/fund-adjustments`, {
+        from: { fund_owner: 'self', fund_type: adjusting.from },
+        to: { fund_owner: 'self', fund_type: adjusting.from === 'liquid' ? 'savings' : 'liquid' },
+        amount_minor: amount,
+      }, adjusting.account.version);
+      setAdjusting(null);
+      try { await onSaved(); onMessage('资金份额已调整，账户余额不变。'); }
+      catch { onMessage('资金份额已调整，读取失败。请点“刷新”。'); }
+    } catch (error) { onMessage(error instanceof Error ? error.message : '调整失败。'); }
+    finally { setBusy(false); }
+  }
+
   const visible = view === 'mine' ? accounts : partnerAccounts;
   return <>
     <div className="section-head"><div><p className="eyebrow">实际账户</p><h1>{view === 'mine' ? '我的账户' : '对象账户'}</h1></div><span>{visible.length} 个账户</span></div>
@@ -74,8 +94,10 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
         <span>{share.fund_owner === 'self' ? '本人' : '对象'}{share.fund_type === 'liquid' ? '流动资金' : '存款'}</span>
         <strong>{money(share.amount_minor)}</strong>
       </div>)}</div>
-      {!account.read_only && <button className="secondary" disabled={busy} onClick={() =>
-        setEditing({ account, name: account.name, type: account.account_type, custodian: account.custodian })}>修改资料</button>}
+      {!account.read_only && <div className="view-switch"><button className="secondary" disabled={busy} onClick={() =>
+        setEditing({ account, name: account.name, type: account.account_type, custodian: account.custodian })}>修改资料</button>
+        <button className="secondary" disabled={busy} onClick={() =>
+          setAdjusting({ account, from: 'liquid', amount: '' })}>调整份额</button></div>}
     </article>)}</div>
     {view === 'mine' && editing && <section className="card form-card"><h2>修改账户资料</h2>
       <p className="muted">初始金额和份额需要单独的修正流程，这里只修改资料。</p>
@@ -90,6 +112,18 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
           <option value="self">本人</option><option value="partner">对象</option></select></label>}
         <div className="view-switch"><button disabled={busy}>保存修改</button>
           <button type="button" className="secondary" onClick={() => setEditing(null)}>取消</button></div>
+      </form>
+    </section>}
+    {view === 'mine' && adjusting && <section className="card form-card"><h2>调整「{adjusting.account.name}」的资金份额</h2>
+      <p className="muted">在本人流动资金和本人存款间划转，账户余额保持不变。存款基准会同步调整。</p>
+      <form onSubmit={saveAdjustment}>
+        <label>划转方向<select value={adjusting.from} onChange={(event) =>
+          setAdjusting({ ...adjusting, from: event.target.value as 'liquid' | 'savings' })}>
+          <option value="liquid">流动资金 → 存款</option><option value="savings">存款 → 流动资金</option></select></label>
+        <label>金额（元）<input inputMode="decimal" value={adjusting.amount} onChange={(event) =>
+          setAdjusting({ ...adjusting, amount: event.target.value })} required /></label>
+        <div className="view-switch"><button disabled={busy}>确认调整</button>
+          <button type="button" className="secondary" onClick={() => setAdjusting(null)}>取消</button></div>
       </form>
     </section>}
     {view === 'mine' && <section className="card form-card"><h2>创建实际账户</h2><p className="muted">初始资金只建立账户基准，不计为收入。</p>

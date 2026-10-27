@@ -3,6 +3,13 @@ import cloudbase from '@cloudbase/js-sdk';
 const env = import.meta.env.VITE_CLOUDBASE_ENV_ID;
 const accessKey = import.meta.env.VITE_PUBLISHABLE_KEY;
 if (!env || !accessKey) throw new Error('CloudBase Web configuration is incomplete');
+const apiBase = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+if (apiBase) {
+  const apiUrl = new URL(apiBase);
+  if (apiUrl.protocol !== 'https:' || apiUrl.origin !== apiBase || apiUrl.username || apiUrl.password) {
+    throw new Error('API address must be an HTTPS origin');
+  }
+}
 
 export const cloudApp = cloudbase.init({
   env,
@@ -39,7 +46,7 @@ export async function activeSession(): Promise<Session | null> {
 }
 
 async function request<T>(session: Session, path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api/v1${path}`, {
+  const response = await fetch(`${apiBase}/api/v1${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json', ...init?.headers },
   });
@@ -76,23 +83,25 @@ export const deleteTransaction = (session: Session, transaction: Transaction) =>
     method: 'DELETE', headers: { 'If-Match': `"${transaction.version}"` },
   });
 
-export async function createWithKey<T>(session: Session, path: string, payload: unknown): Promise<T> {
+export async function createWithKey<T>(session: Session, path: string, payload: unknown, ifMatchVersion?: number): Promise<T> {
   const identity = session.user?.id ?? 'unknown';
   const intentId = `sl-intent:${identity}:${path}`;
   const serialized = JSON.stringify(payload);
+  const intentPayload = ifMatchVersion === undefined ? serialized : JSON.stringify({ ifMatchVersion, payload });
   const previous = sessionStorage.getItem(intentId);
   let intent: { key: string; payload: string } | null = null;
   try { intent = previous ? JSON.parse(previous) : null; } catch { /* Corrupt local intent is ignored. */ }
-  if (intent && intent.payload !== serialized) {
+  if (intent && intent.payload !== intentPayload) {
     throw new Error('上次保存结果尚不明确。请先刷新核对，再到“我的”明确取消旧操作。');
   }
   if (!intent) {
-    intent = { key: crypto.randomUUID(), payload: serialized };
+    intent = { key: crypto.randomUUID(), payload: intentPayload };
     sessionStorage.setItem(intentId, JSON.stringify(intent));
   }
   try {
     const result = await request<T>(session, path, {
-      method: 'POST', headers: { 'Idempotency-Key': intent.key }, body: serialized,
+      method: 'POST', headers: { 'Idempotency-Key': intent.key,
+        ...(ifMatchVersion === undefined ? {} : { 'If-Match': `"${ifMatchVersion}"` }) }, body: serialized,
     });
     sessionStorage.removeItem(intentId);
     return result;
