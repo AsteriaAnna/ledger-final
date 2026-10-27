@@ -1,5 +1,5 @@
 import type { Express } from 'express';
-import { parseOrdinaryTransaction, parseOrdinaryTransactionPatch } from '../../domain/ledger.js';
+import { parseManualTransaction, parseManualTransactionPatch } from '../../domain/ledger.js';
 import { actor, key, payloadHash, route, rpc, version, view } from '../../http/request.js';
 
 export function registerTransactionRoutes(app: Express): void {
@@ -19,7 +19,7 @@ export function registerTransactionRoutes(app: Express): void {
   }));
 
   app.post('/api/v1/transactions', route(async (req, res) => {
-    const input = parseOrdinaryTransaction(req.body);
+    const input = parseManualTransaction(req.body);
     const data = await rpc<Record<string, unknown>>(req, 'sl_create_transaction', {
       p_actor_subject: actor(req), p_key_digest: key(req), p_payload_hash: payloadHash(input), p_input: input,
     });
@@ -29,7 +29,7 @@ export function registerTransactionRoutes(app: Express): void {
 
   app.patch('/api/v1/transactions/:transactionId', route(async (req, res) => {
     const expectedVersion = version(req);
-    const patch = parseOrdinaryTransactionPatch(req.body);
+    const patch = parseManualTransactionPatch(req.body);
     const data = await rpc<Record<string, unknown>>(req, 'sl_patch_transaction', {
       p_actor_subject: actor(req), p_transaction_id: req.params.transactionId,
       p_expected_version: expectedVersion, p_patch: patch,

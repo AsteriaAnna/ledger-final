@@ -11,7 +11,7 @@
 | RelationshipBinding | M1 | 双方用户、有效状态/时间；仅扩大明确读权限 |
 | Account | M2 | holder_user_id、custodian_user_id、name、account_type、opening_date、version；实际账户；不另存可写余额 |
 | Transaction | M3 | owner、type、accounting_semantics、amount_minor、occurred_at、category_code、merchant、note、可选source_account_profile_id、refund_kind、affects_spending、version |
-| TransactionAccountEffect | M3 | transaction、account、role、signed_amount_minor、status、replay_order；applied或historical_only；首次执行顺序在普通编辑后保留 |
+| TransactionAccountEffect | M3 | transaction、account、role、signed_amount_minor、status、replay_order；applied或historical_only；同笔转账两端共用首次顺序，在各自账户内唯一，普通编辑和类型切换后保留 |
 | AccountFundMovement | M2 | account、fund_owner、fund_type、signed_amount_minor、reason、operation_group、可选effect、effective_at |
 | FundAdjustmentInstruction | M2 | account、from/to份额、amount_minor、occurred_at、replay_order；不可变的手动分配原指令，不保存另一份余额 |
 | SourceAccountProfile | M4 | owner、platform、label、可选账号指纹、metadata；昵称不作唯一身份 |

@@ -76,23 +76,34 @@ export function parseAccount(input: unknown): AccountInput {
   };
 }
 
-export type OrdinaryTransactionInput = {
-  type: 'income' | 'expense'; account_id: string; amount_minor: number; occurred_at: string;
+export type ManualTransactionInput = ({ type: 'income' | 'expense'; account_id: string } |
+  { type: 'transfer'; from_account_id: string; to_account_id: string }) & {
+  amount_minor: number; occurred_at: string;
   category_code: string; merchant: string; note: string;
 };
 
-export function parseOrdinaryTransaction(input: unknown): OrdinaryTransactionInput {
-  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '当前支持手动收入和支出，请检查账单内容。'); };
-  if (!object(input) || !allowed(input, ['type', 'account_id', 'amount_minor', 'occurred_at', 'category_code', 'merchant', 'note']) ||
-    (input.type !== 'expense' && input.type !== 'income') || typeof input.account_id !== 'string' || input.account_id.length < 1 ||
+export function parseManualTransaction(input: unknown): ManualTransactionInput {
+  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '收入、支出或转账内容不合法，请检查账户与金额。'); };
+  if (!object(input) || !allowed(input, ['type', 'account_id', 'from_account_id', 'to_account_id', 'amount_minor', 'occurred_at', 'category_code', 'merchant', 'note']) ||
+    (input.type !== 'expense' && input.type !== 'income' && input.type !== 'transfer') ||
     !cents(input.amount_minor) || typeof input.occurred_at !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(input.occurred_at) ||
     Number.isNaN(Date.parse(input.occurred_at)) || Date.parse(input.occurred_at) > Date.now() ||
     (input.category_code !== undefined && !categories.has(String(input.category_code))) ||
     (input.merchant !== undefined && typeof input.merchant !== 'string') ||
     (input.note !== undefined && typeof input.note !== 'string')) return bad();
+  let accounts: { type: 'income' | 'expense'; account_id: string } |
+    { type: 'transfer'; from_account_id: string; to_account_id: string };
+  if (input.type === 'transfer') {
+    if ('account_id' in input || typeof input.from_account_id !== 'string' || !input.from_account_id ||
+      typeof input.to_account_id !== 'string' || !input.to_account_id || input.from_account_id === input.to_account_id) return bad();
+    accounts = { type: 'transfer', from_account_id: input.from_account_id, to_account_id: input.to_account_id };
+  } else {
+    if ('from_account_id' in input || 'to_account_id' in input || typeof input.account_id !== 'string' || !input.account_id) return bad();
+    accounts = { type: input.type, account_id: input.account_id };
+  }
   return {
-    type: input.type, account_id: input.account_id, amount_minor: input.amount_minor,
+    ...accounts, amount_minor: input.amount_minor,
     occurred_at: input.occurred_at, category_code: (input.category_code as string | undefined) ?? 'other',
     merchant: (input.merchant as string | undefined) ?? '', note: (input.note as string | undefined) ?? '',
   };
@@ -132,17 +143,18 @@ export function parseFundAdjustment(input: unknown): FundAdjustment {
   return { from, to, amount_minor: input.amount_minor };
 }
 
-export type OrdinaryTransactionPatch = {
-  type?: 'income' | 'expense'; source_account_profile_id?: null;
+export type ManualTransactionPatch = {
+  type?: 'income' | 'expense' | 'transfer'; source_account_profile_id?: null;
+  from_account_id?: string; to_account_id?: string;
   amount_minor?: number; occurred_at?: string; account_id?: string;
   category_code?: string; merchant?: string; note?: string;
 };
-export function parseOrdinaryTransactionPatch(input: unknown): OrdinaryTransactionPatch {
-  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '当前支持修改手动收入和支出。'); };
-  if (!object(input) || !allowed(input, ['type', 'amount_minor', 'occurred_at', 'account_id', 'category_code', 'merchant', 'note', 'source_account_profile_id'])) return bad();
-  if ('type' in input && input.type !== 'expense' && input.type !== 'income') return bad();
-  const patch: OrdinaryTransactionPatch = {};
-  if (input.type === 'income' || input.type === 'expense') patch.type = input.type;
+export function parseManualTransactionPatch(input: unknown): ManualTransactionPatch {
+  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '账单修改内容不合法。'); };
+  if (!object(input) || !allowed(input, ['type', 'amount_minor', 'occurred_at', 'account_id', 'from_account_id', 'to_account_id', 'category_code', 'merchant', 'note', 'source_account_profile_id'])) return bad();
+  if ('type' in input && input.type !== 'expense' && input.type !== 'income' && input.type !== 'transfer') return bad();
+  const patch: ManualTransactionPatch = {};
+  if (input.type === 'income' || input.type === 'expense' || input.type === 'transfer') patch.type = input.type;
   if ('source_account_profile_id' in input) {
     if (input.source_account_profile_id !== null) return bad();
     patch.source_account_profile_id = null;
@@ -157,10 +169,16 @@ export function parseOrdinaryTransactionPatch(input: unknown): OrdinaryTransacti
       Number.isNaN(Date.parse(input.occurred_at)) || Date.parse(input.occurred_at) > Date.now()) return bad();
     patch.occurred_at = input.occurred_at;
   }
-  if ('account_id' in input) {
-    if (typeof input.account_id !== 'string' || !input.account_id) return bad();
-    patch.account_id = input.account_id;
+  for (const field of ['account_id', 'from_account_id', 'to_account_id'] as const) {
+    if (field in input) {
+      if (typeof input[field] !== 'string' || !input[field]) return bad();
+      patch[field] = input[field];
+    }
   }
+  if (('account_id' in patch && ('from_account_id' in patch || 'to_account_id' in patch)) ||
+    (patch.type === 'transfer' && 'account_id' in patch) ||
+    ((patch.type === 'income' || patch.type === 'expense') && ('from_account_id' in patch || 'to_account_id' in patch)) ||
+    (patch.from_account_id !== undefined && patch.from_account_id === patch.to_account_id)) return bad();
   if ('category_code' in input) {
     if (!categories.has(String(input.category_code))) return bad();
     patch.category_code = input.category_code as string;

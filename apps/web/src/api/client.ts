@@ -25,10 +25,12 @@ export type Account = {
   balance_minor: number; fund_shares: { fund_owner: string; fund_type: string; amount_minor: number; savings_baseline_minor: number | null; savings_gap_minor: number | null }[];
   version: number; read_only: boolean;
 };
+export type ManualType = 'income' | 'expense' | 'transfer';
 export type Transaction = {
-  id: string; type: 'income' | 'expense'; amount_minor: number; occurred_at: string; category_code: string;
-  merchant: string; note: string; account_id: string; version: number; read_only: boolean;
-};
+  id: string; amount_minor: number; occurred_at: string; category_code: string;
+  merchant: string; note: string; version: number; read_only: boolean;
+} & ({ type: 'income' | 'expense'; account_id: string } |
+  { type: 'transfer'; from_account_id: string; to_account_id: string });
 export type Relationship = {
   status: 'unbound' | 'bound'; partner: { id: string; display_name: string } | null;
   permissions: { partner_accounts: 'none' | 'read_only'; partner_transactions: 'none' | 'read_only' };
@@ -85,8 +87,8 @@ export const patchAccount = (session: Session, account: Account, patch: {
 });
 
 export const patchTransaction = (session: Session, transaction: Transaction, patch: {
-  type?: 'income' | 'expense';
-  account_id?: string; amount_minor?: number; occurred_at?: string;
+  type?: ManualType;
+  account_id?: string; from_account_id?: string; to_account_id?: string; amount_minor?: number; occurred_at?: string;
   category_code?: string; merchant?: string; note?: string;
 }) => request<TransactionMutation>(session, `/transactions/${transaction.id}`, {
   method: 'PATCH', headers: { 'If-Match': `"${transaction.version}"` }, body: JSON.stringify(patch),

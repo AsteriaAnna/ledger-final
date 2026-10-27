@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseAccount, parseAccountPatch, parseOrdinaryTransaction, parseOrdinaryTransactionPatch,
+import { parseAccount, parseAccountPatch, parseManualTransaction, parseManualTransactionPatch,
   parseFundAdjustment, parseOpeningState } from '../src/domain/ledger.js';
 
 test('opening allocations must equal the initial balance and cannot repeat a share', () => {
@@ -29,17 +29,17 @@ test('opening supports three distinct shares but never partner liquid funds', ()
 
 test('manual expense accepts only strict positive integer cents and no extra fields', () => {
   const base = { type: 'expense', account_id: 'account-a', amount_minor: 2580, occurred_at: '2026-10-20T12:30:00+08:00' };
-  assert.equal(parseOrdinaryTransaction(base).category_code, 'other');
-  assert.throws(() => parseOrdinaryTransaction({ ...base, amount_minor: 25.8 }));
-  assert.throws(() => parseOrdinaryTransaction({ ...base, user_id: 'forged' }));
+  assert.equal(parseManualTransaction(base).category_code, 'other');
+  assert.throws(() => parseManualTransaction({ ...base, amount_minor: 25.8 }));
+  assert.throws(() => parseManualTransaction({ ...base, user_id: 'forged' }));
 });
 
 test('maintenance patches reject forged balances and invalid money', () => {
   assert.deepEqual(parseAccountPatch({ name: ' 新名称 ' }), { name: '新名称' });
   assert.throws(() => parseAccountPatch({ balance_minor: 1 }));
-  assert.deepEqual(parseOrdinaryTransactionPatch({ amount_minor: 1500, note: '' }), { amount_minor: 1500, note: '' });
-  assert.throws(() => parseOrdinaryTransactionPatch({ amount_minor: 1.5 }));
-  assert.throws(() => parseOrdinaryTransactionPatch({ source_account_profile_id: 'forged' }));
+  assert.deepEqual(parseManualTransactionPatch({ amount_minor: 1500, note: '' }), { amount_minor: 1500, note: '' });
+  assert.throws(() => parseManualTransactionPatch({ amount_minor: 1.5 }));
+  assert.throws(() => parseManualTransactionPatch({ source_account_profile_id: 'forged' }));
 });
 
 test('fund adjustment distinguishes savings owners and rejects illegal shares', () => {
@@ -66,10 +66,25 @@ test('opening replacement normalizes share ordering and rejects invalid whole st
 
 test('ordinary income shares the strict boundary and only allows supported type edits', () => {
   const input = { type: 'income', account_id: 'account-a', amount_minor: 1234, occurred_at: '2026-10-20T12:30:00+08:00' };
-  assert.equal(parseOrdinaryTransaction(input).type, 'income');
-  assert.throws(() => parseOrdinaryTransaction({ ...input, type: 'refund' }));
-  assert.throws(() => parseOrdinaryTransaction({ ...input, accounting_semantics: 'refund_inflow' }));
-  assert.deepEqual(parseOrdinaryTransactionPatch({ type: 'income', source_account_profile_id: null }),
+  assert.equal(parseManualTransaction(input).type, 'income');
+  assert.throws(() => parseManualTransaction({ ...input, type: 'refund' }));
+  assert.throws(() => parseManualTransaction({ ...input, accounting_semantics: 'refund_inflow' }));
+  assert.deepEqual(parseManualTransactionPatch({ type: 'income', source_account_profile_id: null }),
     { type: 'income', source_account_profile_id: null });
-  assert.throws(() => parseOrdinaryTransactionPatch({ type: 'refund' }));
+  assert.throws(() => parseManualTransactionPatch({ type: 'refund' }));
+});
+
+test('transfer requests require two distinct accounts without mixing single-account fields', () => {
+  const input = { type: 'transfer', from_account_id: 'a', to_account_id: 'b', amount_minor: 1234,
+    occurred_at: '2026-10-20T12:30:00+08:00' };
+  assert.equal(parseManualTransaction(input).type, 'transfer');
+  for (const invalid of [{ ...input, to_account_id: 'a' }, { ...input, to_account_id: undefined },
+    { ...input, account_id: 'a' }, { ...input, fee_minor: 1 }, { ...input, type: 'expense' }]) {
+    assert.throws(() => parseManualTransaction(invalid));
+  }
+  assert.deepEqual(parseManualTransactionPatch({ type: 'transfer', from_account_id: 'a', to_account_id: 'b' }),
+    { type: 'transfer', from_account_id: 'a', to_account_id: 'b' });
+  assert.throws(() => parseManualTransactionPatch({ type: 'income', to_account_id: 'b' }));
+  assert.throws(() => parseManualTransactionPatch({ account_id: 'a', from_account_id: 'a' }));
+  assert.throws(() => parseManualTransactionPatch({ from_account_id: 'a', to_account_id: 'a' }));
 });
