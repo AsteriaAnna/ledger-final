@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseAccount, parseAccountPatch, parseExpense, parseExpensePatch,
-  parseFundAdjustment } from '../src/domain/ledger.js';
+  parseFundAdjustment, parseOpeningState } from '../src/domain/ledger.js';
 
 test('opening allocations must equal the initial balance and cannot repeat a share', () => {
   const base = {
@@ -50,4 +50,16 @@ test('fund adjustment distinguishes savings owners and rejects illegal shares', 
   assert.throws(() => parseFundAdjustment({ ...input, to: input.from }));
   assert.equal(parseFundAdjustment({ ...input, from: { fund_owner: 'partner', fund_type: 'savings' } }).from.fund_owner, 'partner');
   assert.throws(() => parseFundAdjustment({ ...input, from: { fund_owner: 'partner', fund_type: 'liquid' } }));
+});
+
+test('opening replacement normalizes share ordering and rejects invalid whole state', () => {
+  const opening = { opening_date: '2026-10-01', opening_balance_minor: 300,
+    opening_allocations: [
+      { fund_owner: 'self', fund_type: 'savings', amount_minor: 100 },
+      { fund_owner: 'self', fund_type: 'liquid', amount_minor: 200 },
+    ] };
+  assert.equal(parseOpeningState(opening).opening_allocations[0].fund_type, 'liquid');
+  assert.throws(() => parseOpeningState({ ...opening, opening_balance_minor: 301 }));
+  assert.throws(() => parseOpeningState({ ...opening, opening_date: '9999-12-31' }));
+  assert.throws(() => parseOpeningState({ ...opening, balance_minor: 300 }));
 });

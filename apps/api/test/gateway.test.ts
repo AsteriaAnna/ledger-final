@@ -14,6 +14,7 @@ test('provider failures map to the published error codes and statuses', async (t
     ['sl_version_mismatch', 412, 'RESOURCE_VERSION_CONFLICT'],
     ['sl_insufficient_funds', 409, 'FUNDS_ALLOCATION_NOT_POSSIBLE'],
     ['sl_unsafe_reversal', 409, 'FUNDS_ALLOCATION_NOT_POSSIBLE'],
+    ['sl_opening_recalculation_conflict', 409, 'OPENING_STATE_RECALCULATION_CONFLICT'],
     ['sl_partner_unavailable', 403, 'FORBIDDEN'],
     ['unrecognized provider failure', 500, 'INTERNAL_ERROR'],
   ] as const) {

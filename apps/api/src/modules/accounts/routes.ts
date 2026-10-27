@@ -1,5 +1,5 @@
 import type { Express } from 'express';
-import { parseAccount, parseAccountPatch, parseFundAdjustment } from '../../domain/ledger.js';
+import { parseAccount, parseAccountPatch, parseFundAdjustment, parseOpeningState } from '../../domain/ledger.js';
 import { actor, key, payloadHash, route, rpc, version, view } from '../../http/request.js';
 
 export function registerAccountRoutes(app: Express): void {
@@ -45,6 +45,17 @@ export function registerAccountRoutes(app: Express): void {
     const data = await rpc<Record<string, unknown>>(req, 'sl_adjust_funds', {
       p_actor_subject: actor(req), p_account_id: req.params.accountId,
       p_key_digest: keyDigest, p_payload_hash: payloadHash({ expectedVersion, input }),
+      p_expected_version: expectedVersion, p_input: input,
+    });
+    res.setHeader('ETag', `"${data.version}"`);
+    res.json({ data });
+  }));
+
+  app.put('/api/v1/accounts/:accountId/opening-state', route(async (req, res) => {
+    const expectedVersion = version(req);
+    const input = parseOpeningState(req.body);
+    const data = await rpc<Record<string, unknown>>(req, 'sl_put_opening_state', {
+      p_actor_subject: actor(req), p_account_id: req.params.accountId,
       p_expected_version: expectedVersion, p_input: input,
     });
     res.setHeader('ETag', `"${data.version}"`);

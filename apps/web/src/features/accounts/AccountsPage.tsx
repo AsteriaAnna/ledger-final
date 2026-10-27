@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { createWithKey, getAccounts, patchAccount, type Account, type Session } from '../../api/client';
+import { createWithKey, getAccount, getAccounts, patchAccount, type Account, type Session } from '../../api/client';
 import { minor, money, todayShanghai } from '../../lib/format';
+import { OpeningStateForm } from './OpeningStateForm';
 
 const types: [string, string][] = [['cash', '现金'], ['bank_card', '银行卡'], ['wechat_balance', '微信零钱'], ['alipay_balance', '支付宝余额'], ['other', '其他']];
 type ShareKey = 'self:liquid' | 'self:savings' | 'partner:savings';
@@ -22,9 +23,19 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
   const [savings, setSavings] = useState('0.00');
   const [partnerSavings, setPartnerSavings] = useState('0.00');
   const [custodian, setCustodian] = useState<'self' | 'partner'>('self');
+  const [openingAccount, setOpeningAccount] = useState<Account | null>(null);
   const [editing, setEditing] = useState<{ account: Account; name: string; type: string; custodian: 'self' | 'partner' } | null>(null);
   const [adjusting, setAdjusting] = useState<{ account: Account; from: ShareKey; to: ShareKey; amount: string } | null>(null);
   const availableShares = bound ? shareOptions : shareOptions.filter(([key]) => key !== 'partner:savings');
+
+  async function editOpening(account: Account) {
+    setBusy(true); onMessage('');
+    try {
+      const current = await getAccount(session, account.id);
+      setEditing(null); setAdjusting(null); setOpeningAccount(current);
+    } catch (error) { onMessage(error instanceof Error ? error.message : '读取初始状态失败。'); }
+    finally { setBusy(false); }
+  }
 
   useEffect(() => {
     if (view !== 'partner' || !bound) return;
@@ -106,8 +117,12 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
       {!account.read_only && <div className="view-switch"><button className="secondary" disabled={busy} onClick={() =>
         setEditing({ account, name: account.name, type: account.account_type, custodian: account.custodian })}>修改资料</button>
         <button className="secondary" disabled={busy} onClick={() =>
-          setAdjusting({ account, from: 'self:liquid', to: 'self:savings', amount: '' })}>调整份额</button></div>}
+          setAdjusting({ account, from: 'self:liquid', to: 'self:savings', amount: '' })}>调整份额</button>
+        <button className="secondary" disabled={busy} onClick={() => editOpening(account)}>修正初始状态</button></div>}
     </article>)}</div>
+    {view === 'mine' && openingAccount && <OpeningStateForm key={`${openingAccount.id}:${openingAccount.version}`}
+      session={session} account={openingAccount} bound={bound} onSaved={onSaved}
+      onClose={() => setOpeningAccount(null)} onMessage={onMessage} />}
     {view === 'mine' && editing && <section className="card form-card"><h2>修改账户资料</h2>
       <p className="muted">初始金额和份额需要单独的修正流程，这里只修改资料。</p>
       <form onSubmit={saveEdit}>

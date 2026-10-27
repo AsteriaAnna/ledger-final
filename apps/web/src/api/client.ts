@@ -36,6 +36,11 @@ export type Relationship = {
 export type BindingInvitation = { binding_token: string; expires_at: string };
 export type FundNotice = { code: 'OWN_SAVINGS_USED' | 'PARTNER_SAVINGS_USED'; amount_minor: number };
 export type TransactionMutation = { transaction: Transaction; notices: FundNotice[] };
+export type OpeningStateInput = {
+  opening_date: string; opening_balance_minor: number;
+  opening_allocations: Array<({ fund_owner: 'self'; fund_type: 'liquid' | 'savings' } |
+    { fund_owner: 'partner'; fund_type: 'savings' }) & { amount_minor: number }>;
+};
 
 export type Session = { access_token: string; user?: { id?: string } };
 class ApiError extends Error {
@@ -59,6 +64,12 @@ async function request<T>(session: Session, path: string, init?: RequestInit): P
 
 export const getAccounts = async (session: Session, view: 'mine' | 'partner' = 'mine') =>
   request<Account[]>(session, `/accounts?view=${view}`);
+export const getAccount = (session: Session, accountId: string) =>
+  request<Account>(session, `/accounts/${encodeURIComponent(accountId)}`);
+export const putOpeningState = (session: Session, account: Account, input: OpeningStateInput) =>
+  request<Account>(session, `/accounts/${account.id}/opening-state`, {
+    method: 'PUT', headers: { 'If-Match': `"${account.version}"` }, body: JSON.stringify(input),
+  });
 export const getTransactions = async (session: Session, view: 'mine' | 'partner' = 'mine') =>
   request<Transaction[]>(session, `/transactions?view=${view}`);
 export const getRelationship = async (session: Session) => request<Relationship>(session, '/relationship');

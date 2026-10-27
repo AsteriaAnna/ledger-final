@@ -36,22 +36,12 @@ function validDate(value: unknown): value is string {
     new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
 }
 
-export type AccountInput = {
-  name: string;
-  account_type: string;
-  custodian: 'self' | 'partner';
-  opening_state: { opening_date: string; opening_balance_minor: number; opening_allocations: Allocation[] };
-};
+export type OpeningState = { opening_date: string; opening_balance_minor: number; opening_allocations: Allocation[] };
 
-export function parseAccount(input: unknown): AccountInput {
-  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '账户信息或初始份额不合法。'); };
-  if (!object(input) || !allowed(input, ['name', 'account_type', 'custodian', 'opening_state'])) return bad();
-  const opening = input.opening_state;
+export function parseOpeningState(opening: unknown): OpeningState {
+  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '初始状态或资金份额不合法。'); };
   if (!object(opening) || !allowed(opening, ['opening_date', 'opening_balance_minor', 'opening_allocations'])) return bad();
-  if (typeof input.name !== 'string' || input.name.trim().length < 1 || input.name.length > 80 ||
-    !accountTypes.has(String(input.account_type)) ||
-    (input.custodian !== undefined && input.custodian !== 'self' && input.custodian !== 'partner') ||
-    !validDate(opening.opening_date) || opening.opening_date > todayInShanghai() ||
+  if (!validDate(opening.opening_date) || opening.opening_date > todayInShanghai() ||
     !cents(opening.opening_balance_minor, true) || !Array.isArray(opening.opening_allocations) ||
     opening.opening_allocations.length < 1 || opening.opening_allocations.length > 3) return bad();
   const allocations: Allocation[] = [];
@@ -63,15 +53,26 @@ export function parseAccount(input: unknown): AccountInput {
     seen.add(`${ref.fund_owner}:${ref.fund_type}`);
     allocations.push({ ...ref, amount_minor: row.amount_minor });
   }
-  if (allocations.reduce((sum, row) => sum + row.amount_minor, 0) !== opening.opening_balance_minor ||
-    !Number.isSafeInteger(allocations.reduce((sum, row) => sum + row.amount_minor, 0))) return bad();
+  const total = allocations.reduce((sum, row) => sum + row.amount_minor, 0);
+  if (total !== opening.opening_balance_minor || !Number.isSafeInteger(total)) return bad();
+  const rank = (row: Allocation) => row.fund_owner === 'partner' ? 2 : row.fund_type === 'savings' ? 1 : 0;
+  return { opening_date: opening.opening_date, opening_balance_minor: total,
+    opening_allocations: allocations.sort((a, b) => rank(a) - rank(b)) };
+}
+
+export type AccountInput = {
+  name: string; account_type: string; custodian: 'self' | 'partner'; opening_state: OpeningState;
+};
+
+export function parseAccount(input: unknown): AccountInput {
+  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '账户信息不合法。'); };
+  if (!object(input) || !allowed(input, ['name', 'account_type', 'custodian', 'opening_state']) ||
+    typeof input.name !== 'string' || input.name.trim().length < 1 || input.name.length > 80 ||
+    !accountTypes.has(String(input.account_type)) ||
+    (input.custodian !== undefined && input.custodian !== 'self' && input.custodian !== 'partner')) return bad();
   return {
     name: input.name.trim(), account_type: input.account_type as string, custodian: input.custodian ?? 'self',
-    opening_state: {
-      opening_date: opening.opening_date,
-      opening_balance_minor: opening.opening_balance_minor,
-      opening_allocations: allocations,
-    },
+    opening_state: parseOpeningState(input.opening_state),
   };
 }
 

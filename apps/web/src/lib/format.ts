@@ -1,5 +1,11 @@
 export const money = (minor: number) => `¥${(minor / 100).toFixed(2)}`;
 
+export function minorInput(value: number): string {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error('金额不合法。');
+  const cents = BigInt(value);
+  return `${cents / 100n}.${String(cents % 100n).padStart(2, '0')}`;
+}
+
 export function minor(value: string): number {
   if (!/^\d+(?:\.\d{1,2})?$/.test(value)) throw new Error('金额请输入最多两位小数。');
   const [yuan, fen = ''] = value.split('.');
