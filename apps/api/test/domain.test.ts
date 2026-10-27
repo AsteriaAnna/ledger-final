@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { allocateExpense, parseAccount, parseExpense, type Share } from '../src/domain/ledger.js';
+import { allocateExpense, parseAccount, parseAccountPatch, parseExpense, parseExpensePatch,
+  type Share } from '../src/domain/ledger.js';
 
 test('opening allocations must equal the initial balance and cannot repeat a share', () => {
   const base = {
@@ -28,4 +29,12 @@ test('manual expense accepts only strict positive integer cents and no extra fie
   assert.equal(parseExpense(base).category_code, 'other');
   assert.throws(() => parseExpense({ ...base, amount_minor: 25.8 }));
   assert.throws(() => parseExpense({ ...base, user_id: 'forged' }));
+});
+
+test('maintenance patches reject forged balances and invalid money', () => {
+  assert.deepEqual(parseAccountPatch({ name: ' 新名称 ' }), { name: '新名称' });
+  assert.throws(() => parseAccountPatch({ balance_minor: 1 }));
+  assert.deepEqual(parseExpensePatch({ amount_minor: 1500, note: '' }), { amount_minor: 1500, note: '' });
+  assert.throws(() => parseExpensePatch({ amount_minor: 1.5 }));
+  assert.throws(() => parseExpensePatch({ source_account_profile_id: 'forged' }));
 });

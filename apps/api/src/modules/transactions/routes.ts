@@ -1,6 +1,6 @@
 import type { Express } from 'express';
-import { parseExpense } from '../../domain/ledger.js';
-import { actor, key, payloadHash, route, rpc, view } from '../../http/request.js';
+import { parseExpense, parseExpensePatch } from '../../domain/ledger.js';
+import { actor, key, payloadHash, route, rpc, version, view } from '../../http/request.js';
 
 export function registerTransactionRoutes(app: Express): void {
   app.get('/api/v1/transactions', route(async (req, res) => {
@@ -25,6 +25,26 @@ export function registerTransactionRoutes(app: Express): void {
     });
     res.setHeader('ETag', `"${(data.transaction as Record<string, unknown>).version}"`);
     res.status(201).json({ data });
+  }));
+
+  app.patch('/api/v1/transactions/:transactionId', route(async (req, res) => {
+    const expectedVersion = version(req);
+    const patch = parseExpensePatch(req.body);
+    const data = await rpc<Record<string, unknown>>(req, 'sl_patch_expense', {
+      p_actor_subject: actor(req), p_transaction_id: req.params.transactionId,
+      p_expected_version: expectedVersion, p_patch: patch,
+    });
+    res.setHeader('ETag', `"${(data.transaction as Record<string, unknown>).version}"`);
+    res.json({ data });
+  }));
+
+  app.delete('/api/v1/transactions/:transactionId', route(async (req, res) => {
+    const expectedVersion = version(req);
+    const data = await rpc<Record<string, unknown>>(req, 'sl_delete_expense', {
+      p_actor_subject: actor(req), p_transaction_id: req.params.transactionId,
+      p_expected_version: expectedVersion,
+    });
+    res.json({ data });
   }));
 
   app.get('/api/v1/transaction-categories', route(async (_req, res) => {

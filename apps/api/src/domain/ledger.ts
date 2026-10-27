@@ -86,6 +86,62 @@ export function parseExpense(input: unknown): ExpenseInput {
   };
 }
 
+export type AccountPatch = { name?: string; account_type?: string; custodian?: 'self' | 'partner' };
+export function parseAccountPatch(input: unknown): AccountPatch {
+  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '账户修改内容不合法。'); };
+  if (!object(input) || !allowed(input, ['name', 'account_type', 'custodian'])) return bad();
+  const patch: AccountPatch = {};
+  if ('name' in input) {
+    if (typeof input.name !== 'string' || input.name.trim().length < 1 || input.name.length > 80) return bad();
+    patch.name = input.name.trim();
+  }
+  if ('account_type' in input) {
+    if (!accountTypes.has(String(input.account_type))) return bad();
+    patch.account_type = input.account_type as string;
+  }
+  if ('custodian' in input) {
+    if (input.custodian !== 'self' && input.custodian !== 'partner') return bad();
+    patch.custodian = input.custodian;
+  }
+  return patch;
+}
+
+export type ExpensePatch = {
+  amount_minor?: number; occurred_at?: string; account_id?: string;
+  category_code?: string; merchant?: string; note?: string;
+};
+export function parseExpensePatch(input: unknown): ExpensePatch {
+  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '此版本只支持修改手动支出。'); };
+  if (!object(input) || !allowed(input, ['type', 'amount_minor', 'occurred_at', 'account_id', 'category_code', 'merchant', 'note'])) return bad();
+  if ('type' in input && input.type !== 'expense') return bad();
+  const patch: ExpensePatch = {};
+  if ('amount_minor' in input) {
+    if (!cents(input.amount_minor)) return bad();
+    patch.amount_minor = input.amount_minor;
+  }
+  if ('occurred_at' in input) {
+    if (typeof input.occurred_at !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(input.occurred_at) ||
+      Number.isNaN(Date.parse(input.occurred_at)) || Date.parse(input.occurred_at) > Date.now()) return bad();
+    patch.occurred_at = input.occurred_at;
+  }
+  if ('account_id' in input) {
+    if (typeof input.account_id !== 'string' || !input.account_id) return bad();
+    patch.account_id = input.account_id;
+  }
+  if ('category_code' in input) {
+    if (!categories.has(String(input.category_code))) return bad();
+    patch.category_code = input.category_code as string;
+  }
+  for (const field of ['merchant', 'note'] as const) {
+    if (field in input) {
+      if (typeof input[field] !== 'string') return bad();
+      patch[field] = input[field];
+    }
+  }
+  return patch;
+}
+
 export function allocateExpense(shares: Share[], amount: number): { liquid: number; savings: number; notices: { code: string; amount_minor: number }[] } {
   if (!cents(amount)) throw new DomainError(422, 'VALIDATION_ERROR', '金额必须为正整数分。');
   const liquid = shares.find((row) => row.fund_owner === 'self' && row.fund_type === 'liquid')?.amount_minor ?? 0;

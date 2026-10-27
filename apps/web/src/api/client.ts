@@ -58,6 +58,24 @@ export const createInvitation = async (session: Session) =>
 export const bindRelationship = async (session: Session, binding_token: string) =>
   createWithKey<Relationship>(session, '/relationship/binding', { binding_token });
 
+export const patchAccount = (session: Session, account: Account, patch: {
+  name?: string; account_type?: string; custodian?: 'self' | 'partner';
+}) => request<Account>(session, `/accounts/${account.id}`, {
+  method: 'PATCH', headers: { 'If-Match': `"${account.version}"` }, body: JSON.stringify(patch),
+});
+
+export const patchTransaction = (session: Session, transaction: Transaction, patch: {
+  account_id?: string; amount_minor?: number; occurred_at?: string;
+  category_code?: string; merchant?: string; note?: string;
+}) => request<{ transaction: Transaction }>(session, `/transactions/${transaction.id}`, {
+  method: 'PATCH', headers: { 'If-Match': `"${transaction.version}"` }, body: JSON.stringify(patch),
+});
+
+export const deleteTransaction = (session: Session, transaction: Transaction) =>
+  request<{ deleted_transaction_id: string }>(session, `/transactions/${transaction.id}`, {
+    method: 'DELETE', headers: { 'If-Match': `"${transaction.version}"` },
+  });
+
 export async function createWithKey<T>(session: Session, path: string, payload: unknown): Promise<T> {
   const identity = session.user?.id ?? 'unknown';
   const intentId = `sl-intent:${identity}:${path}`;

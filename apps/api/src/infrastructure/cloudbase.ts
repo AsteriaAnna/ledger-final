@@ -87,6 +87,8 @@ function mapRpcError(error: unknown): DomainError {
   if (message.includes('sl_relationship_conflict')) return new DomainError(409, 'RELATIONSHIP_CONFLICT', '当前绑定状态已改变。');
   if (message.includes('sl_binding_invitation_invalid')) return new DomainError(422, 'BINDING_INVITATION_INVALID', '绑定凭据无效或已过期。');
   if (message.includes('sl_partner_unavailable')) return new DomainError(403, 'PARTNER_VIEW_UNAVAILABLE', '当前无法查看对象账本。');
+  if (message.includes('sl_version_mismatch')) return new DomainError(412, 'VERSION_MISMATCH', '内容已变化，请刷新后重做。');
+  if (message.includes('sl_unsafe_reversal')) return new DomainError(409, 'UNSAFE_REVERSAL', '这笔账的资金已被使用，无法安全撤销。');
   if (message.includes('sl_invalid_input')) return new DomainError(422, 'VALIDATION_ERROR', '请求内容不合法。');
   return new DomainError(503, 'DATABASE_UNAVAILABLE', '暂时无法读取账本。');
 }

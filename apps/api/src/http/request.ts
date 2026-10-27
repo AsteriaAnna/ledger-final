@@ -23,6 +23,15 @@ export function key(req: Request): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+export function version(req: Request): number {
+  const value = req.get('If-Match');
+  if (!value) throw new DomainError(428, 'PRECONDITION_REQUIRED', '请先刷新再修改。');
+  if (!/^"[1-9][0-9]*"$/.test(value) || !Number.isSafeInteger(Number(value.slice(1, -1)))) {
+    throw new DomainError(400, 'INVALID_PRECONDITION', '版本标识不合法。');
+  }
+  return Number(value.slice(1, -1));
+}
+
 export function payloadHash(value: unknown): string {
   return createHash('sha256').update(canonicalJson(value)).digest('hex');
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { createWithKey, getAccounts, type Account, type Session } from '../../api/client';
+import { createWithKey, getAccounts, patchAccount, type Account, type Session } from '../../api/client';
 import { minor, money, todayShanghai } from '../../lib/format';
 
 const types: [string, string][] = [['cash', '现金'], ['bank_card', '银行卡'], ['wechat_balance', '微信零钱'], ['alipay_balance', '支付宝余额'], ['other', '其他']];
@@ -16,6 +16,7 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
   const [openingDate, setOpeningDate] = useState(todayShanghai);
   const [liquid, setLiquid] = useState('0.00');
   const [savings, setSavings] = useState('0.00');
+  const [editing, setEditing] = useState<{ account: Account; name: string; type: string; custodian: 'self' | 'partner' } | null>(null);
 
   useEffect(() => {
     if (view !== 'partner' || !bound) return;
@@ -46,6 +47,21 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
     finally { setBusy(false); }
   }
 
+  async function saveEdit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!editing) return;
+    setBusy(true); onMessage('');
+    try {
+      await patchAccount(session, editing.account, {
+        name: editing.name, account_type: editing.type, custodian: editing.custodian,
+      });
+      setEditing(null);
+      try { await onSaved(); onMessage('账户资料已更新。'); }
+      catch { onMessage('账户资料已更新，读取失败。请点“刷新”。'); }
+    } catch (error) { onMessage(error instanceof Error ? error.message : '修改失败。'); }
+    finally { setBusy(false); }
+  }
+
   const visible = view === 'mine' ? accounts : partnerAccounts;
   return <>
     <div className="section-head"><div><p className="eyebrow">实际账户</p><h1>{view === 'mine' ? '我的账户' : '对象账户'}</h1></div><span>{visible.length} 个账户</span></div>
@@ -58,7 +74,24 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
         <span>{share.fund_owner === 'self' ? '本人' : '对象'}{share.fund_type === 'liquid' ? '流动资金' : '存款'}</span>
         <strong>{money(share.amount_minor)}</strong>
       </div>)}</div>
+      {!account.read_only && <button className="secondary" disabled={busy} onClick={() =>
+        setEditing({ account, name: account.name, type: account.account_type, custodian: account.custodian })}>修改资料</button>}
     </article>)}</div>
+    {view === 'mine' && editing && <section className="card form-card"><h2>修改账户资料</h2>
+      <p className="muted">初始金额和份额需要单独的修正流程，这里只修改资料。</p>
+      <form onSubmit={saveEdit}>
+        <label>名称<input required maxLength={80} value={editing.name} onChange={(event) =>
+          setEditing({ ...editing, name: event.target.value })} /></label>
+        <label>类型<select value={editing.type} onChange={(event) =>
+          setEditing({ ...editing, type: event.target.value })}>{types.map(([value, label]) =>
+            <option value={value} key={value}>{label}</option>)}</select></label>
+        {bound && <label>保管人<select value={editing.custodian} onChange={(event) =>
+          setEditing({ ...editing, custodian: event.target.value as 'self' | 'partner' })}>
+          <option value="self">本人</option><option value="partner">对象</option></select></label>}
+        <div className="view-switch"><button disabled={busy}>保存修改</button>
+          <button type="button" className="secondary" onClick={() => setEditing(null)}>取消</button></div>
+      </form>
+    </section>}
     {view === 'mine' && <section className="card form-card"><h2>创建实际账户</h2><p className="muted">初始资金只建立账户基准，不计为收入。</p>
       <form onSubmit={save}>
         <label>账户名称<input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="例如：日常现金" required /></label>

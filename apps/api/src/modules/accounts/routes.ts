@@ -1,6 +1,6 @@
 import type { Express } from 'express';
-import { parseAccount } from '../../domain/ledger.js';
-import { actor, key, payloadHash, route, rpc, view } from '../../http/request.js';
+import { parseAccount, parseAccountPatch } from '../../domain/ledger.js';
+import { actor, key, payloadHash, route, rpc, version, view } from '../../http/request.js';
 
 export function registerAccountRoutes(app: Express): void {
   app.get('/api/v1/accounts', route(async (req, res) => {
@@ -25,5 +25,16 @@ export function registerAccountRoutes(app: Express): void {
     });
     res.setHeader('ETag', `"${data.version}"`);
     res.status(201).json({ data });
+  }));
+
+  app.patch('/api/v1/accounts/:accountId', route(async (req, res) => {
+    const expectedVersion = version(req);
+    const patch = parseAccountPatch(req.body);
+    const data = await rpc<Record<string, unknown>>(req, 'sl_patch_account', {
+      p_actor_subject: actor(req), p_account_id: req.params.accountId,
+      p_expected_version: expectedVersion, p_patch: patch,
+    });
+    res.setHeader('ETag', `"${data.version}"`);
+    res.json({ data });
   }));
 }
