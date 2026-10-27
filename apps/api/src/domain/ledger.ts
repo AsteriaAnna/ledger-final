@@ -76,15 +76,15 @@ export function parseAccount(input: unknown): AccountInput {
   };
 }
 
-export type ExpenseInput = {
-  type: 'expense'; account_id: string; amount_minor: number; occurred_at: string;
+export type OrdinaryTransactionInput = {
+  type: 'income' | 'expense'; account_id: string; amount_minor: number; occurred_at: string;
   category_code: string; merchant: string; note: string;
 };
 
-export function parseExpense(input: unknown): ExpenseInput {
-  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '支出信息不合法。'); };
+export function parseOrdinaryTransaction(input: unknown): OrdinaryTransactionInput {
+  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '当前支持手动收入和支出，请检查账单内容。'); };
   if (!object(input) || !allowed(input, ['type', 'account_id', 'amount_minor', 'occurred_at', 'category_code', 'merchant', 'note']) ||
-    input.type !== 'expense' || typeof input.account_id !== 'string' || input.account_id.length < 1 ||
+    (input.type !== 'expense' && input.type !== 'income') || typeof input.account_id !== 'string' || input.account_id.length < 1 ||
     !cents(input.amount_minor) || typeof input.occurred_at !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(input.occurred_at) ||
     Number.isNaN(Date.parse(input.occurred_at)) || Date.parse(input.occurred_at) > Date.now() ||
@@ -92,7 +92,7 @@ export function parseExpense(input: unknown): ExpenseInput {
     (input.merchant !== undefined && typeof input.merchant !== 'string') ||
     (input.note !== undefined && typeof input.note !== 'string')) return bad();
   return {
-    type: 'expense', account_id: input.account_id, amount_minor: input.amount_minor,
+    type: input.type, account_id: input.account_id, amount_minor: input.amount_minor,
     occurred_at: input.occurred_at, category_code: (input.category_code as string | undefined) ?? 'other',
     merchant: (input.merchant as string | undefined) ?? '', note: (input.note as string | undefined) ?? '',
   };
@@ -132,15 +132,21 @@ export function parseFundAdjustment(input: unknown): FundAdjustment {
   return { from, to, amount_minor: input.amount_minor };
 }
 
-export type ExpensePatch = {
+export type OrdinaryTransactionPatch = {
+  type?: 'income' | 'expense'; source_account_profile_id?: null;
   amount_minor?: number; occurred_at?: string; account_id?: string;
   category_code?: string; merchant?: string; note?: string;
 };
-export function parseExpensePatch(input: unknown): ExpensePatch {
-  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '此版本只支持修改手动支出。'); };
-  if (!object(input) || !allowed(input, ['type', 'amount_minor', 'occurred_at', 'account_id', 'category_code', 'merchant', 'note'])) return bad();
-  if ('type' in input && input.type !== 'expense') return bad();
-  const patch: ExpensePatch = {};
+export function parseOrdinaryTransactionPatch(input: unknown): OrdinaryTransactionPatch {
+  const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '当前支持修改手动收入和支出。'); };
+  if (!object(input) || !allowed(input, ['type', 'amount_minor', 'occurred_at', 'account_id', 'category_code', 'merchant', 'note', 'source_account_profile_id'])) return bad();
+  if ('type' in input && input.type !== 'expense' && input.type !== 'income') return bad();
+  const patch: OrdinaryTransactionPatch = {};
+  if (input.type === 'income' || input.type === 'expense') patch.type = input.type;
+  if ('source_account_profile_id' in input) {
+    if (input.source_account_profile_id !== null) return bad();
+    patch.source_account_profile_id = null;
+  }
   if ('amount_minor' in input) {
     if (!cents(input.amount_minor)) return bad();
     patch.amount_minor = input.amount_minor;

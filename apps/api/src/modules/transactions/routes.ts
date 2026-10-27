@@ -1,5 +1,5 @@
 import type { Express } from 'express';
-import { parseExpense, parseExpensePatch } from '../../domain/ledger.js';
+import { parseOrdinaryTransaction, parseOrdinaryTransactionPatch } from '../../domain/ledger.js';
 import { actor, key, payloadHash, route, rpc, version, view } from '../../http/request.js';
 
 export function registerTransactionRoutes(app: Express): void {
@@ -19,8 +19,8 @@ export function registerTransactionRoutes(app: Express): void {
   }));
 
   app.post('/api/v1/transactions', route(async (req, res) => {
-    const input = parseExpense(req.body);
-    const data = await rpc<Record<string, unknown>>(req, 'sl_create_expense', {
+    const input = parseOrdinaryTransaction(req.body);
+    const data = await rpc<Record<string, unknown>>(req, 'sl_create_transaction', {
       p_actor_subject: actor(req), p_key_digest: key(req), p_payload_hash: payloadHash(input), p_input: input,
     });
     res.setHeader('ETag', `"${(data.transaction as Record<string, unknown>).version}"`);
@@ -29,8 +29,8 @@ export function registerTransactionRoutes(app: Express): void {
 
   app.patch('/api/v1/transactions/:transactionId', route(async (req, res) => {
     const expectedVersion = version(req);
-    const patch = parseExpensePatch(req.body);
-    const data = await rpc<Record<string, unknown>>(req, 'sl_patch_expense', {
+    const patch = parseOrdinaryTransactionPatch(req.body);
+    const data = await rpc<Record<string, unknown>>(req, 'sl_patch_transaction', {
       p_actor_subject: actor(req), p_transaction_id: req.params.transactionId,
       p_expected_version: expectedVersion, p_patch: patch,
     });
@@ -40,7 +40,7 @@ export function registerTransactionRoutes(app: Express): void {
 
   app.delete('/api/v1/transactions/:transactionId', route(async (req, res) => {
     const expectedVersion = version(req);
-    const data = await rpc<Record<string, unknown>>(req, 'sl_delete_expense', {
+    const data = await rpc<Record<string, unknown>>(req, 'sl_delete_transaction', {
       p_actor_subject: actor(req), p_transaction_id: req.params.transactionId,
       p_expected_version: expectedVersion,
     });

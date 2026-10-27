@@ -27,7 +27,7 @@ BEGIN
     UPDATE public.sl_fund_adjustments SET occurred_at='2026-10-20T12:00:00+08:00' WHERE id=v_adjustment;
     UPDATE public.sl_movements SET effective_at='2026-10-20T12:00:00+08:00' WHERE operation_group=v_adjustment;
     SELECT to_jsonb(d) INTO v_instruction FROM public.sl_fund_adjustments d WHERE id=v_adjustment;
-    v_result:=public.sl_create_expense(v_subject,repeat('c',64),repeat('c',64),
+    v_result:=public.sl_create_transaction(v_subject,repeat('c',64),repeat('c',64),
       jsonb_build_object('type','expense','account_id',v_account::text,'amount_minor',20000,
         'occurred_at','2026-10-21T12:00:00+08:00','category_code','other','merchant','','note',''));
     v_transaction:=v_result->'transaction'->>'id';
@@ -84,7 +84,7 @@ BEGIN
     IF (v_result->>'balance_minor')::numeric<>100000 OR
       (SELECT status FROM public.sl_effects WHERE transaction_id=v_transaction::uuid)<>'applied' THEN
       RAISE EXCEPTION 'earlier opening did not reactivate original events'; END IF;
-    PERFORM public.sl_patch_expense(v_subject,v_transaction,1,'{"amount_minor":18000}'::jsonb);
+    PERFORM public.sl_patch_transaction(v_subject,v_transaction,1,'{"amount_minor":18000}'::jsonb);
     IF (SELECT replay_order FROM public.sl_effects WHERE transaction_id=v_transaction::uuid)<>v_order THEN
       RAISE EXCEPTION 'ordinary edit reassigned replay order'; END IF;
     SELECT to_jsonb(t) INTO v_fact FROM public.sl_transactions t WHERE id=v_transaction::uuid;
@@ -106,7 +106,7 @@ BEGIN
     PERFORM public.sl_adjust_funds(v_subject,v_tie::text,repeat('e',64),repeat('e',64),1,
       '{"from":{"fund_owner":"self","fund_type":"savings"},
         "to":{"fund_owner":"self","fund_type":"liquid"},"amount_minor":10000}'::jsonb);
-    PERFORM public.sl_create_expense(v_subject,repeat('f',64),repeat('f',64),
+    PERFORM public.sl_create_transaction(v_subject,repeat('f',64),repeat('f',64),
       jsonb_build_object('type','expense','account_id',v_tie::text,'amount_minor',10000,
         'occurred_at',to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
         'category_code','other','merchant','','note',''));
@@ -126,7 +126,7 @@ BEGIN
     PERFORM public.sl_adjust_funds(v_subject,v_partner_account::text,repeat('1',64),repeat('1',64),1,
       '{"from":{"fund_owner":"partner","fund_type":"savings"},
         "to":{"fund_owner":"self","fund_type":"liquid"},"amount_minor":2000}'::jsonb);
-    PERFORM public.sl_create_expense(v_subject,repeat('2',64),repeat('2',64),
+    PERFORM public.sl_create_transaction(v_subject,repeat('2',64),repeat('2',64),
       jsonb_build_object('type','expense','account_id',v_partner_account::text,'amount_minor',2500,
         'occurred_at',to_char(now() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
         'category_code','other','merchant','','note',''));

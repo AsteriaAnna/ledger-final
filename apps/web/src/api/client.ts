@@ -26,7 +26,7 @@ export type Account = {
   version: number; read_only: boolean;
 };
 export type Transaction = {
-  id: string; type: string; amount_minor: number; occurred_at: string; category_code: string;
+  id: string; type: 'income' | 'expense'; amount_minor: number; occurred_at: string; category_code: string;
   merchant: string; note: string; account_id: string; version: number; read_only: boolean;
 };
 export type Relationship = {
@@ -85,6 +85,7 @@ export const patchAccount = (session: Session, account: Account, patch: {
 });
 
 export const patchTransaction = (session: Session, transaction: Transaction, patch: {
+  type?: 'income' | 'expense';
   account_id?: string; amount_minor?: number; occurred_at?: string;
   category_code?: string; merchant?: string; note?: string;
 }) => request<TransactionMutation>(session, `/transactions/${transaction.id}`, {

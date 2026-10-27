@@ -31,7 +31,7 @@ BEGIN
     IF v_saved->>'custodian'<>'partner' OR jsonb_array_length(v_saved->'fund_shares')<>3 THEN
       RAISE EXCEPTION 'opening projection lost owner/custodian'; END IF;
 
-    v_result:=public.sl_create_expense(v_subject,repeat('c',64),repeat('c',64),
+    v_result:=public.sl_create_transaction(v_subject,repeat('c',64),repeat('c',64),
       jsonb_build_object('type','expense','account_id',v_account::text,'amount_minor',25000,
         'occurred_at','2026-10-20T12:00:00+08:00','category_code','other','merchant','','note',''));
     v_transaction:=v_result->'transaction'->>'id';
@@ -41,7 +41,7 @@ BEGIN
       EXISTS(SELECT 1 FROM public.sl_share_state(v_account) WHERE current_minor<>
         CASE WHEN fund_owner_id=v_partner THEN 5000 ELSE 0 END) THEN
       RAISE EXCEPTION 'three-share deduction order failed'; END IF;
-    PERFORM public.sl_patch_expense(v_subject,v_transaction,1,'{"amount_minor":13000}'::jsonb);
+    PERFORM public.sl_patch_transaction(v_subject,v_transaction,1,'{"amount_minor":13000}'::jsonb);
     IF EXISTS(SELECT 1 FROM public.sl_share_state(v_account) WHERE current_minor<>
       CASE WHEN fund_owner_id=v_partner THEN 10000 WHEN fund_type='savings' THEN 7000 ELSE 0 END) THEN
       RAISE EXCEPTION 'partner-first replenishment failed'; END IF;
@@ -82,12 +82,12 @@ BEGIN
       GET STACKED DIAGNOSTICS v_error=MESSAGE_TEXT;
       IF v_error<>'sl_version_mismatch' THEN RAISE; END IF;
     END;
-    v_result:=public.sl_patch_expense(v_subject,v_transaction,2,'{"amount_minor":14000}'::jsonb);
+    v_result:=public.sl_patch_transaction(v_subject,v_transaction,2,'{"amount_minor":14000}'::jsonb);
     IF v_result->'notices'<>'[{"code":"OWN_SAVINGS_USED","amount_minor":1000}]'::jsonb THEN
       RAISE EXCEPTION 'expense increase bypassed own savings'; END IF;
     v_before:=public.sl_account_json(v_account);
     BEGIN
-      PERFORM public.sl_create_expense(v_subject,repeat('0',64),repeat('0',64),
+      PERFORM public.sl_create_transaction(v_subject,repeat('0',64),repeat('0',64),
         jsonb_build_object('type','expense','account_id',v_account::text,'amount_minor',16001,
           'occurred_at','2026-10-20T13:00:00+08:00','category_code','other','merchant','','note',''));
       RAISE EXCEPTION 'overdraft accepted';
@@ -98,7 +98,7 @@ BEGIN
     IF public.sl_account_json(v_account)<>v_before OR
       (SELECT count(*) FROM public.sl_transactions WHERE owner_id=v_actor)<>1 THEN
       RAISE EXCEPTION 'overdraft left a partial mutation'; END IF;
-    PERFORM public.sl_delete_expense(v_subject,v_transaction,3);
+    PERFORM public.sl_delete_transaction(v_subject,v_transaction,3);
     IF EXISTS(SELECT 1 FROM public.sl_share_state(v_account) WHERE current_minor<>
       CASE WHEN fund_owner_id=v_partner THEN 8000 WHEN fund_type='savings' THEN 12000 ELSE 10000 END) THEN
       RAISE EXCEPTION 'delete reversed the wrong owner share'; END IF;
@@ -107,13 +107,13 @@ BEGIN
     -- Spending that replenishment later makes deleting the earlier expense unsafe.
     v_input:=jsonb_build_object('type','expense','account_id',v_account::text,'amount_minor',1000,
       'occurred_at','2026-10-20T14:00:00+08:00','category_code','other','merchant','','note','');
-    v_first:=public.sl_create_expense(v_subject,repeat('1',64),repeat('1',64),v_input)->'transaction'->>'id';
-    PERFORM public.sl_create_expense(v_subject,repeat('2',64),repeat('2',64),jsonb_set(v_input,'{amount_minor}','23000'::jsonb));
-    PERFORM public.sl_patch_expense(v_subject,v_first,1,'{"amount_minor":500}'::jsonb);
-    v_last:=public.sl_create_expense(v_subject,repeat('3',64),repeat('3',64),jsonb_set(v_input,'{amount_minor}','6500'::jsonb))->'transaction'->>'id';
+    v_first:=public.sl_create_transaction(v_subject,repeat('1',64),repeat('1',64),v_input)->'transaction'->>'id';
+    PERFORM public.sl_create_transaction(v_subject,repeat('2',64),repeat('2',64),jsonb_set(v_input,'{amount_minor}','23000'::jsonb));
+    PERFORM public.sl_patch_transaction(v_subject,v_first,1,'{"amount_minor":500}'::jsonb);
+    v_last:=public.sl_create_transaction(v_subject,repeat('3',64),repeat('3',64),jsonb_set(v_input,'{amount_minor}','6500'::jsonb))->'transaction'->>'id';
     v_before:=public.sl_account_json(v_account);
     BEGIN
-      PERFORM public.sl_delete_expense(v_subject,v_first,2);
+      PERFORM public.sl_delete_transaction(v_subject,v_first,2);
       RAISE EXCEPTION 'unsafe partner-share reversal accepted';
     EXCEPTION WHEN raise_exception THEN
       GET STACKED DIAGNOSTICS v_error=MESSAGE_TEXT;
@@ -125,7 +125,7 @@ BEGIN
         'opening_allocations','[{"fund_owner":"self","fund_type":"liquid","amount_minor":0}]'::jsonb));
     v_empty:=(public.sl_create_account(v_subject,repeat('4',64),repeat('4',64),v_input)->>'id')::uuid;
     BEGIN
-      PERFORM public.sl_patch_expense(v_subject,v_last,1,jsonb_build_object('account_id',v_empty::text));
+      PERFORM public.sl_patch_transaction(v_subject,v_last,1,jsonb_build_object('account_id',v_empty::text));
       RAISE EXCEPTION 'move to insufficient account accepted';
     EXCEPTION WHEN raise_exception THEN
       GET STACKED DIAGNOSTICS v_error=MESSAGE_TEXT;
