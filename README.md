@@ -4,11 +4,11 @@
 
 ## 当前状态
 
-核心设计已收敛。开户支出、双人绑定与对象只读，以及当前手动支出的账户资料修改、交易编辑和安全删除已有Web/API代码及`writter-dev` PG迁移。真实Web SDK令牌经本地API完成主要链路；维护操作另用合成数据验证PG原子资金规则，测试数据均已清理。浏览器已实际完成登录、开户、支出、刷新后读取一致结果。本人账户内流动资金与存款的调整迁移已应用，真实令牌HTTP、页面操作和刷新读回均通过；对象存款归属调整尚未实现，**完整资金调整契约和云端部署仍未验收**。实际证据与剩余条件见[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)。
+核心设计已收敛。开户、双人绑定与对象只读、手动支出及其编辑删除、账户资料维护已有Web/API代码和`writter-dev` PG迁移。三份额开户、归属/性质调整、支出扣减及减额回补已补齐；真实PG用例、登录令牌HTTP、本人/对象页面和刷新读回均已验证，测试数据已清理。当前仍缺初始状态修正、收入/转账、官方导入、统计预算及正式部署，**完整24操作与产品上线尚未验收**。实际证据与剩余条件见[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)。
 
 ## 代码位置
 
-`apps/api/src/http`放认证与HTTP入口，`apps/api/src/modules`按关系、账户、交易分开，`apps/api/src/domain`放资金与输入规则，`apps/api/src/infrastructure`接CloudBase。`apps/web/src/features`按页面功能拆分，`apps/web/src/api`集中调用业务API；数据库结构变更放`cloudbase/migrations`。
+`apps/api/src/http`放认证与HTTP入口，`apps/api/src/modules`按关系、账户、交易分开，`apps/api/src/domain`放输入规则与业务错误，`apps/api/src/infrastructure`接CloudBase。M2资金处理在受限PG函数中由账户/交易入口共用，不保留另一套未接入运行的TS扣减算法。`apps/web/src/features`按页面功能拆分，`apps/web/src/api`集中调用业务API；数据库变更放`cloudbase/migrations`，真实数据库用例放`tests/integration`，公开响应结构校验放`tests/contract`。
 
 ## 六份核心设计入口
 
@@ -30,7 +30,7 @@
 M1–M5始终是业务模块，不是里程碑编号。每次实现任务限定主责、依赖、允许修改范围、验收；不重复扫描/重构全部项目，不创建第二套余额或保存逻辑。Git主干main，提交使用Conventional Commits。
 
 
-全部24个公开操作的职责、异常、副作用、边界与调用环节已写入六份核心文档；严格结构统一维护于[openapi.yaml](openapi.yaml)。产品功能包含全部operationId的Mermaid，模块边界包含真实字段到统一账务的数据流。现实现开户、手动支出、双人只读、当前支出的编辑删除和本人两类份额调整；对象存款归属调整、收入/转账、起始状态修正等操作及生产部署仍待后续增量。
+全部24个公开操作的职责、异常、副作用、边界与调用环节已写入六份核心文档；严格结构统一维护于[openapi.yaml](openapi.yaml)。产品功能包含全部operationId的Mermaid，模块边界包含真实字段到统一账务的数据流。现实现开户、手动支出、双人只读、当前支出的编辑删除和三份额调整；收入/转账、起始状态修正等操作及生产部署仍待后续增量。
 
 当前业务与24个API冻结于`524f2da`。开发起点已选定：React + TypeScript + Vite；Node.js + Express模块化单体；现有CloudBase共享PostgreSQL，通过HTTP API + RPC访问；CloudBase Auth；云托管与Web静态托管。单元/API契约/数据库集成验证各自检查对应边界。理由、原子提交、费用与备份待验证项见[实施计划§7](docs/IMPLEMENTATION_PLAN.md#7-当前选定技术组合与最小验证)。当前尚未部署，不需要兼容旧系统或默认升级数据库。
 

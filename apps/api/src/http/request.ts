@@ -9,7 +9,7 @@ export const route = (fn: (req: AuthRequest, res: Response) => Promise<void>) =>
   (req: AuthRequest, res: Response, next: NextFunction) => { fn(req, res).catch(next); };
 
 export function actor(req: AuthRequest): string {
-  if (!req.actorSubject) throw new DomainError(401, 'UNAUTHORIZED', '请先登录。');
+  if (!req.actorSubject) throw new DomainError(401, 'UNAUTHENTICATED', '请先登录。');
   return req.actorSubject;
 }
 
@@ -19,7 +19,7 @@ export function rpc<T>(req: AuthRequest, name: string, args: Record<string, unkn
 
 export function key(req: Request): string {
   const value = req.get('Idempotency-Key');
-  if (!value || value.length > 128) throw new DomainError(400, 'IDEMPOTENCY_KEY_REQUIRED', '缺少有效的请求标识。');
+  if (!value || value.length > 128) throw new DomainError(400, 'BAD_REQUEST', '缺少有效的请求标识。');
   return createHash('sha256').update(value).digest('hex');
 }
 
@@ -27,7 +27,7 @@ export function version(req: Request): number {
   const value = req.get('If-Match');
   if (!value) throw new DomainError(428, 'PRECONDITION_REQUIRED', '请先刷新再修改。');
   if (!/^"[1-9][0-9]*"$/.test(value) || !Number.isSafeInteger(Number(value.slice(1, -1)))) {
-    throw new DomainError(400, 'INVALID_PRECONDITION', '版本标识不合法。');
+    throw new DomainError(400, 'BAD_REQUEST', '版本标识不合法。');
   }
   return Number(value.slice(1, -1));
 }

@@ -25,7 +25,7 @@ app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
 app.use('/api/v1', async (req: AuthRequest, _res, next) => {
   try {
     const header = req.get('Authorization') ?? '';
-    if (!header.startsWith('Bearer ')) throw new DomainError(401, 'UNAUTHORIZED', '请先登录。');
+    if (!header.startsWith('Bearer ')) throw new DomainError(401, 'UNAUTHENTICATED', '请先登录。');
     const identity = await verifyAccessToken(header.slice(7));
     req.actorSubject = identity.subject;
     req.actorDisplayName = identity.displayName;

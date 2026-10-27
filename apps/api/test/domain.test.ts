@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { allocateExpense, parseAccount, parseAccountPatch, parseExpense, parseExpensePatch,
-  parseFundAdjustment, type Share } from '../src/domain/ledger.js';
+import { parseAccount, parseAccountPatch, parseExpense, parseExpensePatch,
+  parseFundAdjustment } from '../src/domain/ledger.js';
 
 test('opening allocations must equal the initial balance and cannot repeat a share', () => {
   const base = {
@@ -14,14 +14,17 @@ test('opening allocations must equal the initial balance and cannot repeat a sha
   assert.throws(() => parseAccount({ ...base, opening_state: { ...base.opening_state, opening_allocations: [base.opening_state.opening_allocations[0], base.opening_state.opening_allocations[0]] } }));
 });
 
-test('expense exhausts liquid funds before savings and refuses overdraft', () => {
-  const shares: Share[] = [
-    { fund_owner: 'self', fund_type: 'liquid', amount_minor: 1000, savings_baseline_minor: null, savings_gap_minor: null },
-    { fund_owner: 'self', fund_type: 'savings', amount_minor: 5000, savings_baseline_minor: 5000, savings_gap_minor: 0 },
-  ];
-  assert.deepEqual(allocateExpense(shares, 2580), { liquid: 1000, savings: 1580,
-    notices: [{ code: 'OWN_SAVINGS_USED', amount_minor: 1580 }] });
-  assert.throws(() => allocateExpense(shares, 6001));
+test('opening supports three distinct shares but never partner liquid funds', () => {
+  const input = { name: '三份额', account_type: 'cash', custodian: 'partner',
+    opening_state: { opening_date: '2026-10-01', opening_balance_minor: 300,
+      opening_allocations: [
+        { fund_owner: 'self', fund_type: 'liquid', amount_minor: 100 },
+        { fund_owner: 'self', fund_type: 'savings', amount_minor: 100 },
+        { fund_owner: 'partner', fund_type: 'savings', amount_minor: 100 },
+      ] } };
+  assert.equal(parseAccount(input).opening_state.opening_allocations.length, 3);
+  assert.throws(() => parseAccount({ ...input, opening_state: { ...input.opening_state,
+    opening_allocations: [{ fund_owner: 'partner', fund_type: 'liquid', amount_minor: 300 }] } }));
 });
 
 test('manual expense accepts only strict positive integer cents and no extra fields', () => {
@@ -39,11 +42,12 @@ test('maintenance patches reject forged balances and invalid money', () => {
   assert.throws(() => parseExpensePatch({ source_account_profile_id: 'forged' }));
 });
 
-test('fund adjustment accepts two distinct self shares and positive integer cents', () => {
+test('fund adjustment distinguishes savings owners and rejects illegal shares', () => {
   const input = { from: { fund_owner: 'self', fund_type: 'liquid' },
     to: { fund_owner: 'self', fund_type: 'savings' }, amount_minor: 1250 };
   assert.equal(parseFundAdjustment(input).amount_minor, 1250);
   assert.throws(() => parseFundAdjustment({ ...input, amount_minor: 0 }));
   assert.throws(() => parseFundAdjustment({ ...input, to: input.from }));
-  assert.throws(() => parseFundAdjustment({ ...input, from: { fund_owner: 'partner', fund_type: 'savings' } }));
+  assert.equal(parseFundAdjustment({ ...input, from: { fund_owner: 'partner', fund_type: 'savings' } }).from.fund_owner, 'partner');
+  assert.throws(() => parseFundAdjustment({ ...input, from: { fund_owner: 'partner', fund_type: 'liquid' } }));
 });

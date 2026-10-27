@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { createWithKey, deleteTransaction, getAccounts, getTransactions, patchTransaction,
-  type Account, type Session, type Transaction } from '../../api/client';
+  type Account, type Session, type Transaction, type TransactionMutation, type FundNotice } from '../../api/client';
 import { minor, money, nowShanghai } from '../../lib/format';
 
 const categories: [string, string][] = [['food', '餐饮'], ['shopping', '购物'], ['transport', '交通'], ['education', '教育'], ['health', '医疗'], ['entertainment', '娱乐'], ['utilities', '生活缴费'], ['other', '其他']];
+const noticeText = (notices: FundNotice[]) => notices.map(notice =>
+  `已使用${notice.code === 'OWN_SAVINGS_USED' ? '本人' : '对象'}存款 ${money(notice.amount_minor)}。`).join('');
 
 export function TransactionsPage({ session, accounts, transactions, bound, refreshSequence, onSaved, onMessage }: {
   session: Session; accounts: Account[]; transactions: Transaction[]; bound: boolean; refreshSequence: number;
@@ -36,12 +38,12 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
   async function save(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); onMessage('');
     try {
-      await createWithKey(session, '/transactions', {
+      const result = await createWithKey<TransactionMutation>(session, '/transactions', {
         type: 'expense', account_id: accountId, amount_minor: minor(amount),
         occurred_at: `${date}:00+08:00`, category_code: category, merchant, note,
       });
       setAmount(''); setMerchant(''); setNote('');
-      try { await onSaved(); onMessage('支出已保存，账户余额已更新。'); }
+      try { await onSaved(); onMessage(`支出已保存，账户余额已更新。${noticeText(result.notices)}`); }
       catch { onMessage('支出已保存，读取失败。请点“刷新”重试读取。'); }
     } catch (error) { onMessage(error instanceof Error ? error.message : '保存失败。'); }
     finally { setBusy(false); }
@@ -52,13 +54,13 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
     if (!editing) return;
     setBusy(true); onMessage('');
     try {
-      await patchTransaction(session, editing.transaction, {
+      const result = await patchTransaction(session, editing.transaction, {
         account_id: editing.accountId, amount_minor: minor(editing.amount),
         occurred_at: `${editing.date}:00+08:00`, category_code: editing.category,
         merchant: editing.merchant, note: editing.note,
       });
       setEditing(null);
-      try { await onSaved(); onMessage('账单已更新。'); }
+      try { await onSaved(); onMessage(`账单已更新。${noticeText(result.notices)}`); }
       catch { onMessage('账单已更新，读取失败。请点“刷新”。'); }
     } catch (error) { onMessage(error instanceof Error ? error.message : '修改失败。'); }
     finally { setBusy(false); }

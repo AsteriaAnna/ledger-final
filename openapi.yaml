@@ -1464,6 +1464,30 @@ components:
       - opening_balance_minor
       - opening_allocations
       additionalProperties: false
+    OpeningStateView:
+      description: 账户初始状态的只读投影；资金所有者相对当前查看者，因此对象账户可出现partner/liquid。写入仍使用OpeningState。
+      type: object
+      properties:
+        opening_date: *id005
+        opening_balance_minor: *id008
+        opening_allocations:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            type: object
+            properties:
+              fund_owner:
+                type: string
+                enum: [self, partner]
+              fund_type:
+                type: string
+                enum: [liquid, savings]
+              amount_minor: *id008
+            required: [fund_owner, fund_type, amount_minor]
+            additionalProperties: false
+      required: [opening_date, opening_balance_minor, opening_allocations]
+      additionalProperties: false
     AccountCreate:
       type: object
       properties:
@@ -1535,7 +1559,7 @@ components:
           - self
           - partner
         opening_state:
-          $ref: '#/components/schemas/OpeningState'
+          $ref: '#/components/schemas/OpeningStateView'
         balance_minor: *id008
         fund_shares:
           type: array

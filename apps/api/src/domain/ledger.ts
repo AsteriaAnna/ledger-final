@@ -1,5 +1,6 @@
-export type Allocation = { fund_owner: 'self'; fund_type: 'liquid' | 'savings'; amount_minor: number };
-export type Share = Allocation & { savings_baseline_minor: number | null; savings_gap_minor: number | null };
+export type ShareRef = { fund_owner: 'self'; fund_type: 'liquid' | 'savings' } |
+  { fund_owner: 'partner'; fund_type: 'savings' };
+export type Allocation = ShareRef & { amount_minor: number };
 
 export class DomainError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
@@ -13,6 +14,15 @@ const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const cents = (value: unknown, allowZero = false): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && (allowZero ? value >= 0 : value > 0);
+
+function shareRef(value: unknown): ShareRef | null {
+  if (!object(value) || !allowed(value, ['fund_owner', 'fund_type'])) return null;
+  if (value.fund_owner === 'self' && (value.fund_type === 'liquid' || value.fund_type === 'savings')) {
+    return { fund_owner: 'self', fund_type: value.fund_type };
+  }
+  return value.fund_owner === 'partner' && value.fund_type === 'savings' ?
+    { fund_owner: 'partner', fund_type: 'savings' } : null;
+}
 
 function todayInShanghai(): string {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
@@ -29,7 +39,7 @@ function validDate(value: unknown): value is string {
 export type AccountInput = {
   name: string;
   account_type: string;
-  custodian: 'self';
+  custodian: 'self' | 'partner';
   opening_state: { opening_date: string; opening_balance_minor: number; opening_allocations: Allocation[] };
 };
 
@@ -39,23 +49,24 @@ export function parseAccount(input: unknown): AccountInput {
   const opening = input.opening_state;
   if (!object(opening) || !allowed(opening, ['opening_date', 'opening_balance_minor', 'opening_allocations'])) return bad();
   if (typeof input.name !== 'string' || input.name.trim().length < 1 || input.name.length > 80 ||
-    !accountTypes.has(String(input.account_type)) || (input.custodian !== undefined && input.custodian !== 'self') ||
+    !accountTypes.has(String(input.account_type)) ||
+    (input.custodian !== undefined && input.custodian !== 'self' && input.custodian !== 'partner') ||
     !validDate(opening.opening_date) || opening.opening_date > todayInShanghai() ||
     !cents(opening.opening_balance_minor, true) || !Array.isArray(opening.opening_allocations) ||
     opening.opening_allocations.length < 1 || opening.opening_allocations.length > 3) return bad();
   const allocations: Allocation[] = [];
   const seen = new Set<string>();
   for (const row of opening.opening_allocations) {
-    if (!object(row) || !allowed(row, ['fund_owner', 'fund_type', 'amount_minor']) || row.fund_owner !== 'self' ||
-      (row.fund_type !== 'liquid' && row.fund_type !== 'savings') || !cents(row.amount_minor, true) ||
-      seen.has(row.fund_type)) return bad();
-    seen.add(row.fund_type);
-    allocations.push({ fund_owner: 'self', fund_type: row.fund_type, amount_minor: row.amount_minor });
+    if (!object(row) || !allowed(row, ['fund_owner', 'fund_type', 'amount_minor']) || !cents(row.amount_minor, true)) return bad();
+    const ref = shareRef({ fund_owner: row.fund_owner, fund_type: row.fund_type });
+    if (!ref || seen.has(`${ref.fund_owner}:${ref.fund_type}`)) return bad();
+    seen.add(`${ref.fund_owner}:${ref.fund_type}`);
+    allocations.push({ ...ref, amount_minor: row.amount_minor });
   }
   if (allocations.reduce((sum, row) => sum + row.amount_minor, 0) !== opening.opening_balance_minor ||
     !Number.isSafeInteger(allocations.reduce((sum, row) => sum + row.amount_minor, 0))) return bad();
   return {
-    name: input.name.trim(), account_type: input.account_type as string, custodian: 'self',
+    name: input.name.trim(), account_type: input.account_type as string, custodian: input.custodian ?? 'self',
     opening_state: {
       opening_date: opening.opening_date,
       opening_balance_minor: opening.opening_balance_minor,
@@ -107,21 +118,17 @@ export function parseAccountPatch(input: unknown): AccountPatch {
 }
 
 export type FundAdjustment = {
-  from: { fund_owner: 'self'; fund_type: 'liquid' | 'savings' };
-  to: { fund_owner: 'self'; fund_type: 'liquid' | 'savings' };
+  from: ShareRef;
+  to: ShareRef;
   amount_minor: number;
 };
 
 export function parseFundAdjustment(input: unknown): FundAdjustment {
   const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '资金调整内容不合法。'); };
-  if (!object(input) || !allowed(input, ['from', 'to', 'amount_minor']) ||
-    !object(input.from) || !object(input.to) ||
-    !allowed(input.from, ['fund_owner', 'fund_type']) || !allowed(input.to, ['fund_owner', 'fund_type']) ||
-    input.from.fund_owner !== 'self' || input.to.fund_owner !== 'self' ||
-    (input.from.fund_type !== 'liquid' && input.from.fund_type !== 'savings') ||
-    (input.to.fund_type !== 'liquid' && input.to.fund_type !== 'savings') ||
-    input.from.fund_type === input.to.fund_type || !cents(input.amount_minor)) return bad();
-  return input as FundAdjustment;
+  if (!object(input) || !allowed(input, ['from', 'to', 'amount_minor']) || !cents(input.amount_minor)) return bad();
+  const from = shareRef(input.from), to = shareRef(input.to);
+  if (!from || !to || (from.fund_owner === to.fund_owner && from.fund_type === to.fund_type)) return bad();
+  return { from, to, amount_minor: input.amount_minor };
 }
 
 export type ExpensePatch = {
@@ -158,16 +165,6 @@ export function parseExpensePatch(input: unknown): ExpensePatch {
     }
   }
   return patch;
-}
-
-export function allocateExpense(shares: Share[], amount: number): { liquid: number; savings: number; notices: { code: string; amount_minor: number }[] } {
-  if (!cents(amount)) throw new DomainError(422, 'VALIDATION_ERROR', '金额必须为正整数分。');
-  const liquid = shares.find((row) => row.fund_owner === 'self' && row.fund_type === 'liquid')?.amount_minor ?? 0;
-  const savings = shares.find((row) => row.fund_owner === 'self' && row.fund_type === 'savings')?.amount_minor ?? 0;
-  if (amount > liquid + savings) throw new DomainError(409, 'INSUFFICIENT_FUNDS', '账户可用资金不足。');
-  const useLiquid = Math.min(liquid, amount);
-  const useSavings = amount - useLiquid;
-  return { liquid: useLiquid, savings: useSavings, notices: useSavings ? [{ code: 'OWN_SAVINGS_USED', amount_minor: useSavings }] : [] };
 }
 
 export function canonicalJson(value: unknown): string {

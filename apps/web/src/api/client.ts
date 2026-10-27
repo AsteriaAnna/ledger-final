@@ -34,6 +34,8 @@ export type Relationship = {
   permissions: { partner_accounts: 'none' | 'read_only'; partner_transactions: 'none' | 'read_only' };
 };
 export type BindingInvitation = { binding_token: string; expires_at: string };
+export type FundNotice = { code: 'OWN_SAVINGS_USED' | 'PARTNER_SAVINGS_USED'; amount_minor: number };
+export type TransactionMutation = { transaction: Transaction; notices: FundNotice[] };
 
 export type Session = { access_token: string; user?: { id?: string } };
 class ApiError extends Error {
@@ -74,7 +76,7 @@ export const patchAccount = (session: Session, account: Account, patch: {
 export const patchTransaction = (session: Session, transaction: Transaction, patch: {
   account_id?: string; amount_minor?: number; occurred_at?: string;
   category_code?: string; merchant?: string; note?: string;
-}) => request<{ transaction: Transaction }>(session, `/transactions/${transaction.id}`, {
+}) => request<TransactionMutation>(session, `/transactions/${transaction.id}`, {
   method: 'PATCH', headers: { 'If-Match': `"${transaction.version}"` }, body: JSON.stringify(patch),
 });
 

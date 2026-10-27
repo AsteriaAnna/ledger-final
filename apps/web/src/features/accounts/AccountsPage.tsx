@@ -3,6 +3,10 @@ import { createWithKey, getAccounts, patchAccount, type Account, type Session } 
 import { minor, money, todayShanghai } from '../../lib/format';
 
 const types: [string, string][] = [['cash', '现金'], ['bank_card', '银行卡'], ['wechat_balance', '微信零钱'], ['alipay_balance', '支付宝余额'], ['other', '其他']];
+type ShareKey = 'self:liquid' | 'self:savings' | 'partner:savings';
+const shareOptions: [ShareKey, string][] = [['self:liquid', '本人流动资金'], ['self:savings', '本人存款'], ['partner:savings', '对象存款']];
+const shareRef = (key: ShareKey) => key === 'partner:savings' ?
+  { fund_owner: 'partner', fund_type: 'savings' } : { fund_owner: 'self', fund_type: key === 'self:liquid' ? 'liquid' : 'savings' };
 
 export function AccountsPage({ session, accounts, bound, refreshSequence, onSaved, onMessage }: {
   session: Session; accounts: Account[]; bound: boolean; refreshSequence: number;
@@ -16,8 +20,11 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
   const [openingDate, setOpeningDate] = useState(todayShanghai);
   const [liquid, setLiquid] = useState('0.00');
   const [savings, setSavings] = useState('0.00');
+  const [partnerSavings, setPartnerSavings] = useState('0.00');
+  const [custodian, setCustodian] = useState<'self' | 'partner'>('self');
   const [editing, setEditing] = useState<{ account: Account; name: string; type: string; custodian: 'self' | 'partner' } | null>(null);
-  const [adjusting, setAdjusting] = useState<{ account: Account; from: 'liquid' | 'savings'; amount: string } | null>(null);
+  const [adjusting, setAdjusting] = useState<{ account: Account; from: ShareKey; to: ShareKey; amount: string } | null>(null);
+  const availableShares = bound ? shareOptions : shareOptions.filter(([key]) => key !== 'partner:savings');
 
   useEffect(() => {
     if (view !== 'partner' || !bound) return;
@@ -31,17 +38,19 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
     event.preventDefault(); setBusy(true); onMessage('');
     try {
       const openingLiquid = minor(liquid), openingSavings = minor(savings);
-      const total = openingLiquid + openingSavings;
+      const openingPartner = bound ? minor(partnerSavings) : 0;
+      const total = openingLiquid + openingSavings + openingPartner;
       if (!Number.isSafeInteger(total)) throw new Error('初始金额过大。');
       await createWithKey<Account>(session, '/accounts', {
-        name, account_type: type, custodian: 'self',
+        name, account_type: type, custodian: bound ? custodian : 'self',
         opening_state: { opening_date: openingDate, opening_balance_minor: total,
           opening_allocations: [
             { fund_owner: 'self', fund_type: 'liquid', amount_minor: openingLiquid },
             { fund_owner: 'self', fund_type: 'savings', amount_minor: openingSavings },
+            ...(bound ? [{ fund_owner: 'partner', fund_type: 'savings', amount_minor: openingPartner }] : []),
           ] },
       });
-      setName(''); setLiquid('0.00'); setSavings('0.00');
+      setName(''); setLiquid('0.00'); setSavings('0.00'); setPartnerSavings('0.00');
       try { await onSaved(); onMessage('账户已保存。'); }
       catch { onMessage('账户已保存，读取失败。请点“刷新”重试读取。'); }
     } catch (error) { onMessage(error instanceof Error ? error.message : '保存失败。'); }
@@ -70,9 +79,9 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
     try {
       const amount = minor(adjusting.amount);
       if (amount <= 0) throw new Error('调整金额必须大于零。');
+      if (adjusting.from === adjusting.to) throw new Error('转出和转入份额不能相同。');
       await createWithKey<Account>(session, `/accounts/${adjusting.account.id}/fund-adjustments`, {
-        from: { fund_owner: 'self', fund_type: adjusting.from },
-        to: { fund_owner: 'self', fund_type: adjusting.from === 'liquid' ? 'savings' : 'liquid' },
+        from: shareRef(adjusting.from), to: shareRef(adjusting.to),
         amount_minor: amount,
       }, adjusting.account.version);
       setAdjusting(null);
@@ -97,7 +106,7 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
       {!account.read_only && <div className="view-switch"><button className="secondary" disabled={busy} onClick={() =>
         setEditing({ account, name: account.name, type: account.account_type, custodian: account.custodian })}>修改资料</button>
         <button className="secondary" disabled={busy} onClick={() =>
-          setAdjusting({ account, from: 'liquid', amount: '' })}>调整份额</button></div>}
+          setAdjusting({ account, from: 'self:liquid', to: 'self:savings', amount: '' })}>调整份额</button></div>}
     </article>)}</div>
     {view === 'mine' && editing && <section className="card form-card"><h2>修改账户资料</h2>
       <p className="muted">初始金额和份额需要单独的修正流程，这里只修改资料。</p>
@@ -115,11 +124,14 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
       </form>
     </section>}
     {view === 'mine' && adjusting && <section className="card form-card"><h2>调整「{adjusting.account.name}」的资金份额</h2>
-      <p className="muted">在本人流动资金和本人存款间划转，账户余额保持不变。存款基准会同步调整。</p>
+      <p className="muted">在本账户的资金份额间等额划转，账户余额保持不变。存款基准会同步调整。</p>
       <form onSubmit={saveAdjustment}>
-        <label>划转方向<select value={adjusting.from} onChange={(event) =>
-          setAdjusting({ ...adjusting, from: event.target.value as 'liquid' | 'savings' })}>
-          <option value="liquid">流动资金 → 存款</option><option value="savings">存款 → 流动资金</option></select></label>
+        <label>转出份额<select value={adjusting.from} onChange={(event) =>
+          setAdjusting({ ...adjusting, from: event.target.value as ShareKey })}>
+          {availableShares.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        <label>转入份额<select value={adjusting.to} onChange={(event) =>
+          setAdjusting({ ...adjusting, to: event.target.value as ShareKey })}>
+          {availableShares.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
         <label>金额（元）<input inputMode="decimal" value={adjusting.amount} onChange={(event) =>
           setAdjusting({ ...adjusting, amount: event.target.value })} required /></label>
         <div className="view-switch"><button disabled={busy}>确认调整</button>
@@ -130,9 +142,12 @@ export function AccountsPage({ session, accounts, bound, refreshSequence, onSave
       <form onSubmit={save}>
         <label>账户名称<input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="例如：日常现金" required /></label>
         <label>账户类型<select value={type} onChange={(event) => setType(event.target.value)}>{types.map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+        {bound && <label>保管人<select value={custodian} onChange={(event) => setCustodian(event.target.value as 'self' | 'partner')}>
+          <option value="self">本人</option><option value="partner">对象</option></select></label>}
         <label>起始日期<input type="date" max={todayShanghai()} value={openingDate} onChange={(event) => setOpeningDate(event.target.value)} required /></label>
         <div className="two"><label>本人流动资金（元）<input inputMode="decimal" value={liquid} onChange={(event) => setLiquid(event.target.value)} required /></label>
           <label>本人存款（元）<input inputMode="decimal" value={savings} onChange={(event) => setSavings(event.target.value)} required /></label></div>
+        {bound && <label>对象存款（元）<input inputMode="decimal" value={partnerSavings} onChange={(event) => setPartnerSavings(event.target.value)} required /></label>}
         <button disabled={busy}>保存账户</button>
       </form>
     </section>}
