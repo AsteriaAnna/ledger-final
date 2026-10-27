@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "outDir": "test-dist", "rootDir": "." },
-  "include": ["src/domain.ts", "test/domain.test.ts"]
+  "include": ["src/domain/ledger.ts", "test/domain.test.ts"]
 }

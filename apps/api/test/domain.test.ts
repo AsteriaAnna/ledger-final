@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { allocateExpense, parseAccount, parseExpense, type Share } from '../src/domain.js';
+import { allocateExpense, parseAccount, parseExpense, type Share } from '../src/domain/ledger.js';
 
 test('opening allocations must equal the initial balance and cannot repeat a share', () => {
   const base = {

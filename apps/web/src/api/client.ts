@@ -20,10 +20,18 @@ export type Account = {
 };
 export type Transaction = {
   id: string; type: string; amount_minor: number; occurred_at: string; category_code: string;
-  merchant: string; note: string; account_id: string; version: number;
+  merchant: string; note: string; account_id: string; version: number; read_only: boolean;
 };
+export type Relationship = {
+  status: 'unbound' | 'bound'; partner: { id: string; display_name: string } | null;
+  permissions: { partner_accounts: 'none' | 'read_only'; partner_transactions: 'none' | 'read_only' };
+};
+export type BindingInvitation = { binding_token: string; expires_at: string };
 
-type Session = { access_token: string; user?: { id?: string } };
+export type Session = { access_token: string; user?: { id?: string } };
+class ApiError extends Error {
+  constructor(public status: number, public code: string | undefined, message: string) { super(message); }
+}
 export async function activeSession(): Promise<Session | null> {
   const { data, error } = await auth.getSession();
   if (error || !data?.session || data.session.user?.is_anonymous) return null;
@@ -36,12 +44,19 @@ async function request<T>(session: Session, path: string, init?: RequestInit): P
     headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json', ...init?.headers },
   });
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(body?.message ?? `请求失败（${response.status}）`);
+  if (!response.ok) throw new ApiError(response.status, body?.code, body?.message ?? `请求失败（${response.status}）`);
   return body.data as T;
 }
 
-export const getAccounts = async (session: Session) => request<Account[]>(session, '/accounts');
-export const getTransactions = async (session: Session) => request<Transaction[]>(session, '/transactions');
+export const getAccounts = async (session: Session, view: 'mine' | 'partner' = 'mine') =>
+  request<Account[]>(session, `/accounts?view=${view}`);
+export const getTransactions = async (session: Session, view: 'mine' | 'partner' = 'mine') =>
+  request<Transaction[]>(session, `/transactions?view=${view}`);
+export const getRelationship = async (session: Session) => request<Relationship>(session, '/relationship');
+export const createInvitation = async (session: Session) =>
+  createWithKey<BindingInvitation>(session, '/relationship/invitations', {});
+export const bindRelationship = async (session: Session, binding_token: string) =>
+  createWithKey<Relationship>(session, '/relationship/binding', { binding_token });
 
 export async function createWithKey<T>(session: Session, path: string, payload: unknown): Promise<T> {
   const identity = session.user?.id ?? 'unknown';
@@ -57,11 +72,20 @@ export async function createWithKey<T>(session: Session, path: string, payload: 
     intent = { key: crypto.randomUUID(), payload: serialized };
     sessionStorage.setItem(intentId, JSON.stringify(intent));
   }
-  const result = await request<T>(session, path, {
-    method: 'POST', headers: { 'Idempotency-Key': intent.key }, body: serialized,
-  });
-  sessionStorage.removeItem(intentId);
-  return result;
+  try {
+    const result = await request<T>(session, path, {
+      method: 'POST', headers: { 'Idempotency-Key': intent.key }, body: serialized,
+    });
+    sessionStorage.removeItem(intentId);
+    return result;
+  } catch (error) {
+    // A definitive client rejection did not commit this intent. Network and server
+    // failures keep the key so a retry cannot silently create a second operation.
+    if (error instanceof ApiError && error.status < 500 && error.code !== 'REQUEST_IN_PROGRESS') {
+      sessionStorage.removeItem(intentId);
+    }
+    throw error;
+  }
 }
 
 export function pendingIntents(session: Session): number {

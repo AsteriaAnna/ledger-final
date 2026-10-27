@@ -1,4 +1,4 @@
-import { DomainError } from './domain.js';
+import { DomainError } from '../domain/ledger.js';
 import cloudbase from '@cloudbase/js-sdk';
 
 const envId = process.env.CLOUDBASE_ENV_ID;
@@ -14,7 +14,7 @@ async function responseJson(response: Response): Promise<unknown> {
   try { return text ? JSON.parse(text) : null; } catch { return null; }
 }
 
-export async function verifyAccessToken(token: string): Promise<string> {
+export async function verifyAccessToken(token: string): Promise<{ subject: string; displayName: string }> {
   if (!token || token.length > 8192) throw new DomainError(401, 'UNAUTHORIZED', '请重新登录。');
   let response: Response;
   try {
@@ -27,10 +27,12 @@ export async function verifyAccessToken(token: string): Promise<string> {
   if (!profile || typeof profile !== 'object' || !('sub' in profile) || typeof profile.sub !== 'string' || !profile.sub) {
     throw new DomainError(503, 'AUTH_UNAVAILABLE', '登录状态暂时无法验证。');
   }
-  return profile.sub;
+  const name = ('name' in profile && typeof profile.name === 'string' && profile.name.trim()) ||
+    ('username' in profile && typeof profile.username === 'string' && profile.username.trim()) || '星账用户';
+  return { subject: profile.sub, displayName: name.slice(0, 48) };
 }
 
-export async function callRpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
+export async function callRpc<T>(name: string, args: Record<string, unknown>, displayName?: string): Promise<T> {
   try {
     return await callRpcRaw<T>(name, args);
   } catch (error) {
@@ -39,7 +41,7 @@ export async function callRpc<T>(name: string, args: Record<string, unknown>): P
     if (name === 'sl_provision_user' || !(error instanceof DomainError) || error.code !== 'USER_NOT_PROVISIONED' ||
       typeof args.p_actor_subject !== 'string') throw error;
     await callRpcRaw('sl_provision_user', {
-      p_auth_subject: args.p_actor_subject, p_display_name: '星账用户',
+      p_auth_subject: args.p_actor_subject, p_display_name: displayName || '星账用户',
     });
     return callRpcRaw<T>(name, args);
   }
@@ -82,6 +84,9 @@ function mapRpcError(error: unknown): DomainError {
   if (message.includes('sl_account_not_found') || message.includes('sl_transaction_not_found')) return new DomainError(404, 'NOT_FOUND', '目标不存在。');
   if (message.includes('sl_insufficient_funds')) return new DomainError(409, 'INSUFFICIENT_FUNDS', '账户可用资金不足。');
   if (message.includes('sl_idempotency_conflict')) return new DomainError(409, 'IDEMPOTENCY_KEY_CONFLICT', '同一请求标识对应的内容不同。');
+  if (message.includes('sl_relationship_conflict')) return new DomainError(409, 'RELATIONSHIP_CONFLICT', '当前绑定状态已改变。');
+  if (message.includes('sl_binding_invitation_invalid')) return new DomainError(422, 'BINDING_INVITATION_INVALID', '绑定凭据无效或已过期。');
+  if (message.includes('sl_partner_unavailable')) return new DomainError(403, 'PARTNER_VIEW_UNAVAILABLE', '当前无法查看对象账本。');
   if (message.includes('sl_invalid_input')) return new DomainError(422, 'VALIDATION_ERROR', '请求内容不合法。');
   return new DomainError(503, 'DATABASE_UNAVAILABLE', '暂时无法读取账本。');
 }

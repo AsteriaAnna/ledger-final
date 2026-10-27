@@ -4,7 +4,11 @@
 
 ## 当前状态
 
-核心设计已收敛。首条“登录→实际账户初始份额→手动支出→重读”增量已有Web/API代码和`writter-dev` PG迁移；真实Web SDK登录令牌经本地API完成开户、支出、重放和重读，合成数据已清理。**浏览器页面交互和云端部署尚未验收**，不能把本地HTTP验证写成完整产品验收。实际证据与剩余条件见[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)。
+核心设计已收敛。首条“登录→实际账户初始份额→手动支出→重读”和下一条“生成邀请→确认绑定→对象账户/账单只读”已有Web/API代码及`writter-dev` PG迁移；真实Web SDK令牌经本地API完成两条链路，合成数据已清理。**浏览器页面交互和云端部署尚未验收**，不能把本地HTTP验证写成完整产品验收。实际证据与剩余条件见[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)。
+
+## 代码位置
+
+`apps/api/src/http`放认证与HTTP入口，`apps/api/src/modules`按关系、账户、交易分开，`apps/api/src/domain`放资金与输入规则，`apps/api/src/infrastructure`接CloudBase。`apps/web/src/features`按页面功能拆分，`apps/web/src/api`集中调用业务API；数据库结构变更放`cloudbase/migrations`。
 
 ## 六份核心设计入口
 
@@ -26,10 +30,10 @@
 M1–M5始终是业务模块，不是里程碑编号。每次实现任务限定主责、依赖、允许修改范围、验收；不重复扫描/重构全部项目，不创建第二套余额或保存逻辑。Git主干main，提交使用Conventional Commits。
 
 
-全部24个公开操作的职责、异常、副作用、边界与调用环节已写入六份核心文档；严格结构统一维护于[openapi.yaml](openapi.yaml)。产品功能包含全部operationId的Mermaid，模块边界包含真实字段到统一账务的数据流。采用单库事务、必要POST幂等及资源版本比较；当前仍未实现生产API，不新增过程报告。
+全部24个公开操作的职责、异常、副作用、边界与调用环节已写入六份核心文档；严格结构统一维护于[openapi.yaml](openapi.yaml)。产品功能包含全部operationId的Mermaid，模块边界包含真实字段到统一账务的数据流。现仅实现首条账务与双人只读相关操作，其他公开操作及生产部署仍待后续增量。
 
 当前业务与24个API冻结于`524f2da`。开发起点已选定：React + TypeScript + Vite；Node.js + Express模块化单体；现有CloudBase共享PostgreSQL，通过HTTP API + RPC访问；CloudBase Auth；云托管与Web静态托管。单元/API契约/数据库集成验证各自检查对应边界。理由、原子提交、费用与备份待验证项见[实施计划§7](docs/IMPLEMENTATION_PLAN.md#7-当前选定技术组合与最小验证)。当前尚未部署，不需要兼容旧系统或默认升级数据库。
 
 整体工程路线、阶段交付、各类依赖与24个API归属统一见[阶段交付与依赖](docs/PHASE_DELIVERIES_AND_DEPENDENCIES.md)。实际进度统一见[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)。
 
-当前从[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)领取下一步工作。[阶段设计](docs/PHASE_DELIVERIES_AND_DEPENDENCIES.md)中的内部函数、物理表、RPC及安装步骤是待实际验证的施工候选，不替代业务规则与OpenAPI。先核对隔离环境能力，再交付第一条实际页面→API→数据库→刷新链路；每次只细化当前可交付的增量。旧P0逐卡整理方案未执行，已从当前工作入口撤下。
+当前从[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)领取下一步工作。[阶段设计](docs/PHASE_DELIVERIES_AND_DEPENDENCIES.md)中的未实施内部函数、物理表、RPC及安装步骤仍是施工候选，不替代业务规则与OpenAPI。后续按账户维护、交易编辑删除、官方导入、统计预算推进；每次只细化当前可交付的增量。旧P0逐卡整理方案未执行，已从当前工作入口撤下。
