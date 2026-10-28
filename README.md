@@ -32,7 +32,7 @@
 M1–M5始终是业务模块，不是里程碑编号。每次实现任务限定主责、依赖、允许修改范围、验收；不重复扫描/重构全部项目，不创建第二套余额或保存逻辑。Git主干main，提交使用Conventional Commits。
 
 
-全部24个公开操作的职责、异常、副作用、边界与调用环节已写入六份核心文档；严格结构统一维护于[openapi.yaml](openapi.yaml)。产品功能包含全部operationId的Mermaid，模块边界包含真实字段到统一账务的数据流。现有实现覆盖M1–M5，路由集合检查与真实HTTP结构验证分开记录；正式托管、独立恢复和真实原件复测仍待验收。
+全部24个公开操作的职责、异常、副作用、边界与调用环节已写入六份核心文档；严格结构统一维护于[openapi.yaml](openapi.yaml)。产品功能包含全部operationId的Mermaid，模块边界包含真实字段到统一账务的数据流。现有实现覆盖M1–M5，路由集合检查与真实HTTP结构验证分开记录；应用账务已独立恢复，正式托管、平台完整恢复和真实原件复测仍待验收。
 
 当前业务与24个API冻结于`524f2da`。开发起点已选定：React + TypeScript + Vite；Node.js + Express模块化单体；现有CloudBase共享PostgreSQL，通过HTTP API + RPC访问；CloudBase Auth；云托管与Web静态托管。单元/API契约/数据库集成验证各自检查对应边界。理由、原子提交、费用与备份待验证项见[实施计划§7](docs/IMPLEMENTATION_PLAN.md#7-当前选定技术组合与最小验证)。当前尚未部署，不需要兼容旧系统或默认升级数据库。
 
