@@ -1,13 +1,15 @@
 import type { Express } from 'express';
 import { parseManualTransaction, parseManualTransactionPatch } from '../../domain/ledger.js';
-import { actor, key, payloadHash, route, rpc, version, view } from '../../http/request.js';
+import { actor, key, payloadHash, route, rpc, version } from '../../http/request.js';
+import {decodeCursor,encodeCursor,listQuery,pageScope} from '../../http/pagination.js';
 
 export function registerTransactionRoutes(app: Express): void {
   app.get('/api/v1/transactions', route(async (req, res) => {
-    const data = await rpc<unknown[]>(req, 'sl_list_transactions_visible', {
-      p_actor_subject: actor(req), p_view: view(req),
+    const query=listQuery('listTransactions',req.query),scope=pageScope(actor(req),'transactions',{view:query.view,...query.filters}),position=decodeCursor(scope,query.cursor);
+    const result = await rpc<{data:unknown[];next:{time:string;id:string}|null}>(req, 'sl_transactions_page', {
+      p_actor_subject: actor(req), p_view: query.view,p_limit:query.limit,p_filters:query.filters,p_after_time:position?.time??null,p_after_id:position?.id??null,
     });
-    res.json({ data, page: { next_cursor: null } });
+    res.json({ data:result.data, page: { next_cursor: encodeCursor(scope,result.next) } });
   }));
 
   app.get('/api/v1/transactions/:transactionId', route(async (req, res) => {

@@ -48,6 +48,10 @@ export async function callRpc<T>(name: string, args: Record<string, unknown>, di
       if (args.p_view === 'partner') throw new DomainError(403, 'FORBIDDEN', '当前无法查看对象账本。');
       return [] as T;
     }
+    if(name==='sl_accounts_page'||name==='sl_transactions_page'){
+      if(args.p_view==='partner')throw new DomainError(403,'FORBIDDEN','当前无法查看对象账本。');
+      return {data:[],next:null} as T;
+    }
     if (name === 'sl_get_account_visible' || name === 'sl_get_transaction_visible' || name==='sl_import_json') {
       throw new DomainError(404, 'RESOURCE_NOT_FOUND', '目标不存在。');
     }

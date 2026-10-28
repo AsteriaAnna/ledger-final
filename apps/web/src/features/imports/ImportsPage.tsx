@@ -47,7 +47,12 @@ export function ImportsPage({session,accounts,transactions,onSaved,onMessage}:{s
         <p>{batch.platform==='wechat'?'微信':'支付宝'} · {batch.source_account_profile?.label??'来源账号待确认'} · 实读 {batch.summary.read_rows} 行</p>
         <p>{Object.entries(outcomes).map(([key,name])=>`${name} ${batch.summary[key]??0}`).join('；')}</p>
         <p className="muted">{batch.coverage.reconciliation_eligible?'范围核对条件已满足。':'本批暂不进行手动账单缺失核对：'+batch.coverage.blockers.map(r=>reasons[r]??r).join('；')}</p>
-        <details><summary>文件头与覆盖范围</summary><pre>{JSON.stringify({metadata:batch.source_metadata,coverage:batch.coverage},null,2)}</pre></details>
+        <details><summary>文件头与覆盖范围</summary>
+          <p>声明范围：{String(batch.coverage.declared_from??'未识别')} 至 {String(batch.coverage.declared_to??'未识别')}</p>
+          <p>导出时间：{String(batch.coverage.exported_at??'未识别')}；实际核对终点：{String(batch.coverage.effective_to??'未确定')}</p>
+          <p>声明 {String(batch.coverage.declared_record_count??'未知')} 行，实读 {String(batch.coverage.parsed_record_count)} 行；{batch.coverage.structural_complete?'结构与范围完整':'结构或范围待核对'}</p>
+          <pre>{String(batch.source_metadata.raw_header??'')}</pre>
+        </details>
       </section>
       {!batch.source_account_profile&&<section className="card form-card"><h2>确认来源账号</h2><p>档案代表导出文件的微信或支付宝账号，昵称不会作为唯一身份。</p>
         {!!batch.profile_candidates.length&&<><label>已有档案<select value={profile} onChange={e=>setProfile(e.target.value)}><option value="">请选择</option>

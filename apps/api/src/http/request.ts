@@ -35,11 +35,3 @@ export function version(req: Request): number {
 export function payloadHash(value: unknown): string {
   return createHash('sha256').update(canonicalJson(value)).digest('hex');
 }
-
-export function view(req: Request): 'mine' | 'partner' {
-  const value = req.query.view ?? 'mine';
-  if ((value !== 'mine' && value !== 'partner') || Object.keys(req.query).some((name) => name !== 'view')) {
-    throw new DomainError(422, 'VALIDATION_ERROR', '此版本只支持本人或对象视图。');
-  }
-  return value;
-}

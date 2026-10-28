@@ -1,13 +1,15 @@
 import type { Express } from 'express';
 import { parseAccount, parseAccountPatch, parseFundAdjustment, parseOpeningState } from '../../domain/ledger.js';
-import { actor, key, payloadHash, route, rpc, version, view } from '../../http/request.js';
+import { actor, key, payloadHash, route, rpc, version } from '../../http/request.js';
+import {decodeCursor,encodeCursor,listQuery,pageScope} from '../../http/pagination.js';
 
 export function registerAccountRoutes(app: Express): void {
   app.get('/api/v1/accounts', route(async (req, res) => {
-    const data = await rpc<unknown[]>(req, 'sl_list_accounts_visible', {
-      p_actor_subject: actor(req), p_view: view(req),
+    const query=listQuery('listAccounts',req.query),scope=pageScope(actor(req),'accounts',{view:query.view}),position=decodeCursor(scope,query.cursor);
+    const result = await rpc<{data:unknown[];next:{time:string;id:string}|null}>(req, 'sl_accounts_page', {
+      p_actor_subject: actor(req), p_view: query.view,p_limit:query.limit,p_after_time:position?.time??null,p_after_id:position?.id??null,
     });
-    res.json({ data, page: { next_cursor: null } });
+    res.json({ data:result.data, page: { next_cursor: encodeCursor(scope,result.next) } });
   }));
 
   app.get('/api/v1/accounts/:accountId', route(async (req, res) => {

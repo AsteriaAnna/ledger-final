@@ -36,7 +36,9 @@ test('fresh identity reads return empty state without provisioning writes', asyn
     (error: unknown) => error instanceof DomainError && error.code === 'RESOURCE_NOT_FOUND');
   await assert.rejects(callRpc('sl_import_json', { p_subject: 'fixture',p_batch:'missing' }),
     (error: unknown) => error instanceof DomainError && error.code === 'RESOURCE_NOT_FOUND');
-  assert.equal(fetchMock.mock.callCount(), 5);
+  assert.deepEqual(await callRpc('sl_accounts_page',{p_actor_subject:'fixture',p_view:'mine'}),{data:[],next:null});
+  assert.deepEqual(await callRpc('sl_transactions_page',{p_actor_subject:'fixture',p_view:'mine'}),{data:[],next:null});
+  assert.equal(fetchMock.mock.callCount(), 7);
   assert.ok(fetchMock.mock.calls.every(call => !String(call.arguments[0]).includes('sl_provision_user')));
 });
 

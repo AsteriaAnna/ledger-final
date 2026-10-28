@@ -6,6 +6,7 @@ import { registerRelationshipRoutes } from '../modules/relationship/routes.js';
 import { registerTransactionRoutes } from '../modules/transactions/routes.js';
 import type { AuthRequest } from './request.js';
 import { registerImportRoutes } from '../modules/imports/routes.js';
+import { registerOverviewRoutes } from '../modules/overview/routes.js';
 
 export const app = express();
 app.disable('x-powered-by');
@@ -17,6 +18,7 @@ app.use((req, res, next) => {
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type, Idempotency-Key, If-Match');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Expose-Headers','ETag');
   }
   if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
   next();
@@ -38,6 +40,8 @@ registerRelationshipRoutes(app);
 registerAccountRoutes(app);
 registerTransactionRoutes(app);
 registerImportRoutes(app);
+registerOverviewRoutes(app);
+app.use('/api/v1',(_req,res)=>res.status(404).json({code:'RESOURCE_NOT_FOUND',message:'目标不存在。'}));
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (error instanceof DomainError) { res.status(error.status).json({ code: error.code, message: error.message }); return; }

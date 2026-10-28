@@ -1,4 +1,8 @@
-export const money = (minor: number) => `¥${(minor / 100).toFixed(2)}`;
+export const money = (minor: number) => {
+  if(!Number.isSafeInteger(minor))return '金额超出显示范围';
+  const n=BigInt(minor),a=n<0n?-n:n;
+  return `${n<0n?'-':''}¥${a/100n}.${String(a%100n).padStart(2,'0')}`;
+};
 
 export function minorInput(value: number): string {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error('金额不合法。');

@@ -57,28 +57,47 @@ export async function activeSession(): Promise<Session | null> {
 }
 
 export async function requestEnvelope<T>(session: Session, path: string, init?: RequestInit): Promise<T> {
+  const current=await auth.getSession();
+  const latest=current.data?.session;
+  if(!latest || latest.user?.is_anonymous || latest.user?.id!==session.user?.id){
+    if(current.error)throw new ApiError(500,'INTERNAL_ERROR','暂时无法恢复登录状态，请稍后重试。');
+    window.dispatchEvent(new Event('sl-session-expired'));
+    throw new ApiError(401,'UNAUTHENTICATED','请重新登录，未确认的保存操作仍会保留。');
+  }
   const response = await fetch(`${apiBase}/api/v1${path}`, {
     ...init,
-    headers: { Authorization: `Bearer ${session.access_token}`, ...(init?.body instanceof FormData ? {} : {'Content-Type': 'application/json'}), ...init?.headers },
+    headers: { Authorization: `Bearer ${latest.access_token}`, ...(init?.body instanceof FormData ? {} : {'Content-Type': 'application/json'}), ...init?.headers },
   });
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw new ApiError(response.status, body?.code, body?.message ?? `请求失败（${response.status}）`);
+  if (!response.ok) {
+    if(response.status===401)window.dispatchEvent(new Event('sl-session-expired'));
+    throw new ApiError(response.status, body?.code, body?.message ?? `请求失败（${response.status}）`);
+  }
   return body as T;
 }
 export async function request<T>(session: Session,path:string,init?:RequestInit):Promise<T> {
   return (await requestEnvelope<{data:T}>(session,path,init)).data;
 }
 
-export const getAccounts = async (session: Session, view: 'mine' | 'partner' = 'mine') =>
-  request<Account[]>(session, `/accounts?view=${view}`);
+export type Page<T>={data:T[];page:{next_cursor:string|null}};
+export async function getAccounts(session:Session,view:'mine'|'partner'='mine'):Promise<Account[]> {
+  const all:Account[]=[];let cursor:string|null=null;const seen=new Set<string>();
+  do{const query=new URLSearchParams({view,limit:'100'});if(cursor)query.set('cursor',cursor);
+    const page=await requestEnvelope<Page<Account>>(session,`/accounts?${query}`);all.push(...page.data);cursor=page.page.next_cursor;
+    if(cursor){if(seen.has(cursor))throw new Error('账户分页读取异常，请刷新重试。');seen.add(cursor);}
+  }while(cursor);return all;
+}
 export const getAccount = (session: Session, accountId: string) =>
   request<Account>(session, `/accounts/${encodeURIComponent(accountId)}`);
 export const putOpeningState = (session: Session, account: Account, input: OpeningStateInput) =>
   request<Account>(session, `/accounts/${account.id}/opening-state`, {
     method: 'PUT', headers: { 'If-Match': `"${account.version}"` }, body: JSON.stringify(input),
   });
-export const getTransactions = async (session: Session, view: 'mine' | 'partner' = 'mine') =>
-  request<Transaction[]>(session, `/transactions?view=${view}`);
+export function getTransactionPage(session:Session,filters:Record<string,string>={}) {
+  const query=new URLSearchParams();for(const [key,value] of Object.entries(filters))if(value)query.set(key,value);
+  return requestEnvelope<Page<Transaction>>(session,`/transactions?${query}`);
+}
+export const getTransactions=async(session:Session,view:'mine'|'partner'='mine')=>(await getTransactionPage(session,{view})).data;
 export const getRelationship = async (session: Session) => request<Relationship>(session, '/relationship');
 export const createInvitation = async (session: Session) =>
   createWithKey<BindingInvitation>(session, '/relationship/invitations', {});
@@ -133,7 +152,7 @@ export async function withRequestIntent<T>(session:Session,path:string,payload:u
   } catch (error) {
     // A definitive client rejection did not commit this intent. Network and server
     // failures keep the key so a retry cannot silently create a second operation.
-    if (error instanceof ApiError && error.status < 500 && error.code !== 'REQUEST_IN_PROGRESS') {
+    if (error instanceof ApiError && error.status < 500 && error.status!==401 && error.code !== 'REQUEST_IN_PROGRESS') {
       sessionStorage.removeItem(intentId);
     }
     throw error;

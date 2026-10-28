@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { createWithKey, deleteTransaction, getAccounts, getTransactions, patchTransaction,
+import { useEffect, useState, useRef } from 'react';
+import { createWithKey, deleteTransaction, getAccounts, getTransactionPage, patchTransaction,
   type Account, type Session, type Transaction, type TransactionMutation, type FundNotice, type ManualType } from '../../api/client';
 import { minor, minorInput, money, nowShanghai } from '../../lib/format';
 import { TransactionAccounts, transactionAccounts } from './TransactionAccounts';
@@ -10,13 +10,16 @@ const typeNames = { income: '收入', expense: '支出', transfer: '转账',refu
 const noticeText = (notices: FundNotice[]) => notices.map(notice =>
   `已使用${notice.code === 'OWN_SAVINGS_USED' ? '本人' : '对象'}存款 ${money(notice.amount_minor)}。`).join('');
 
-export function TransactionsPage({ session, accounts, transactions, bound, refreshSequence, onSaved, onMessage }: {
+export function TransactionsPage({ session, accounts, transactions,nextCursor, bound, refreshSequence, onSaved, onMessage }: {
   session: Session; accounts: Account[]; transactions: Transaction[]; bound: boolean; refreshSequence: number;
+  nextCursor:string|null;
   onSaved: () => Promise<void>; onMessage: (message: string) => void;
 }) {
   const [view, setView] = useState<'mine' | 'partner'>('mine');
   const [partnerAccounts, setPartnerAccounts] = useState<Account[]>([]);
-  const [partnerTransactions, setPartnerTransactions] = useState<Transaction[]>([]);
+  const [rows,setRows]=useState<Transaction[]>(transactions),[next,setNext]=useState<string|null>(nextCursor),[reading,setReading]=useState(false);
+  const [filters,setFilters]=useState<Record<string,string>>({}),[filterDraft,setFilterDraft]=useState<Record<string,string>>({});
+  const generation=useRef(0);
   const [busy, setBusy] = useState(false);
   const [accountId, setAccountId] = useState('');
   const [type, setType] = useState<ManualType>('expense');
@@ -35,12 +38,22 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
   useEffect(() => {
     if (view !== 'partner' || !bound) return;
     let live = true;
-    Promise.all([getAccounts(session, 'partner'), getTransactions(session, 'partner')])
-      .then(([nextAccounts, nextTransactions]) => {
-        if (live) { setPartnerAccounts(nextAccounts); setPartnerTransactions(nextTransactions); }
-      }).catch((error) => { if (live) onMessage(error.message); });
+    getAccounts(session,'partner').then(nextAccounts=>{if(live)setPartnerAccounts(nextAccounts);})
+      .catch((error) => { if (live) onMessage(error.message); });
     return () => { live = false; };
   }, [view, bound, session, refreshSequence]);
+  useEffect(()=>{const id=++generation.current;
+    if(view==='mine'&&!Object.values(filters).some(Boolean)){setRows(transactions);setNext(nextCursor);setReading(false);return;}
+    setReading(true);setRows([]);setNext(null);
+    getTransactionPage(session,{...filters,view}).then(page=>{if(generation.current===id){setRows(page.data);setNext(page.page.next_cursor);}})
+      .catch(error=>{if(generation.current===id)onMessage(error.message);}).finally(()=>{if(generation.current===id)setReading(false);});
+    return()=>{generation.current++;};
+  },[view,session,refreshSequence,transactions,nextCursor,filters]);
+  async function more(){if(!next)return;const id=generation.current;setReading(true);
+    try{const page=await getTransactionPage(session,{...filters,view,cursor:next});if(id===generation.current){
+      setRows(previous=>[...new Map([...previous,...page.data].map(t=>[t.id,t])).values()]);setNext(page.page.next_cursor);
+    }}catch(error){onMessage(error instanceof Error?error.message:'读取失败。');}finally{if(id===generation.current)setReading(false);}}
+  function changeView(value:'mine'|'partner'){setView(value);setFilterDraft(previous=>({...previous,account_id:''}));setFilters(previous=>({...previous,account_id:''}));}
 
   async function save(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); onMessage('');
@@ -89,11 +102,23 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
   }
 
   const visibleAccounts = view === 'mine' ? accounts : partnerAccounts;
-  const visibleTransactions = view === 'mine' ? transactions : partnerTransactions;
+  const visibleTransactions = rows;
   return <>
-    <div className="section-head"><div><p className="eyebrow">手动记账</p><h1>{view === 'mine' ? '我的账单' : '对象账单'}</h1></div><span>{visibleTransactions.length} 笔</span></div>
-    {bound && <div className="view-switch"><button className={view === 'mine' ? 'active' : 'secondary'} onClick={() => setView('mine')}>我的</button>
-      <button className={view === 'partner' ? 'active' : 'secondary'} onClick={() => setView('partner')}>对象 · 只读</button></div>}
+    <div className="section-head"><div><p className="eyebrow">账务记录</p><h1>{view === 'mine' ? '我的账单' : '对象账单'}</h1></div><span>{next?'已显示 ':''}{visibleTransactions.length} 笔</span></div>
+    {bound && <div className="view-switch"><button className={view === 'mine' ? 'active' : 'secondary'} onClick={() => changeView('mine')}>我的</button>
+      <button className={view === 'partner' ? 'active' : 'secondary'} onClick={() => changeView('partner')}>对象 · 只读</button></div>}
+    <section className="card form-card"><h2>筛选账单</h2><form onSubmit={e=>{e.preventDefault();setEditing(null);setFilters({...filterDraft});}}>
+      <div className="two"><label>开始日期<input type="date" value={filterDraft.from??''} onChange={e=>setFilterDraft({...filterDraft,from:e.target.value})}/></label>
+        <label>结束日期<input type="date" value={filterDraft.to??''} onChange={e=>setFilterDraft({...filterDraft,to:e.target.value})}/></label></div>
+      <div className="two"><label>交易类型<select value={filterDraft.type??''} onChange={e=>setFilterDraft({...filterDraft,type:e.target.value})}><option value="">全部类型</option>
+        {Object.entries(typeNames).map(([value,name])=><option key={value} value={value}>{name}</option>)}</select></label>
+        <label>筛选账户<select value={filterDraft.account_id??''} onChange={e=>setFilterDraft({...filterDraft,account_id:e.target.value})}><option value="">全部账户</option>
+          {visibleAccounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}</select></label></div>
+      <label>筛选分类<select value={filterDraft.category_code??''} onChange={e=>setFilterDraft({...filterDraft,category_code:e.target.value})}><option value="">全部分类</option>
+        {categories.map(([value,name])=><option key={value} value={value}>{name}</option>)}</select></label>
+      <label>商户或备注<input value={filterDraft.q??''} onChange={e=>setFilterDraft({...filterDraft,q:e.target.value})}/></label>
+      <div className="view-switch"><button disabled={reading||busy}>应用筛选</button><button type="button" className="secondary" disabled={reading||busy} onClick={()=>{setFilterDraft({});setFilters({});}}>清空筛选</button></div>
+    </form></section>
     {view === 'mine' && <section className="card form-card"><h2>记一笔{typeNames[type]}</h2><form onSubmit={save}>
       <label>记账类型<select value={type} onChange={event => setType(event.target.value as ManualType)}>
         <option value="expense">支出</option><option value="income">收入</option><option value="transfer">内部转账</option></select></label>
@@ -113,6 +138,7 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
           `${visibleAccounts.find(account => account.id === transaction.from_account_id)?.name} → ${visibleAccounts.find(account => account.id === transaction.to_account_id)?.name}` :
           visibleAccounts.find(account => account.id === transaction.account_id)?.name}{transaction.read_only ? ' · 只读' : ''}</p></div>
       <div><strong>{transaction.type === 'income'||transaction.type==='refund' ? '+' : transaction.type === 'expense' ? '−' : ''}{money(transaction.amount_minor)}</strong>
+        <details><summary>账单详情</summary><p>分类：{categories.find(([value])=>value===transaction.category_code)?.[1]??'其他'}</p><p>备注：{transaction.note||'无'}</p></details>
         {transaction.type==='refund'&&<p>{transaction.affects_spending?'抵减花销':'不抵减花销'} · {transaction.refund_kind==='merchant_refund'?'商户退款':'转账退回'}</p>}
         {!!transaction.source_summaries?.length&&<details><summary>官方来源</summary>{transaction.source_summaries.map(s=><p key={s.source_record_id}>{s.platform==='wechat'?'微信':'支付宝'} · 原始时间 {s.source_occurred_at}</p>)}</details>}
         {!transaction.read_only && <div className="view-switch">
@@ -125,6 +151,8 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
           <button className="secondary" disabled={busy} onClick={() => remove(transaction)}>删除</button>
         </div>}</div>
     </article>)}</div>
+    {reading&&<p role="status">正在读取账单…</p>}
+    {next&&<button className="secondary" disabled={reading||busy} onClick={()=>void more()}>显示更多账单</button>}
     {view === 'mine' && editing && <section className="card form-card"><h2>编辑账单</h2>
       <form onSubmit={saveEdit}>
         {editing.type==='refund'?<p>官方退款 · 类型与来源子类型保持不变。</p>:<label>编辑记账类型<select value={editing.type} onChange={event =>

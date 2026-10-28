@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { activeSession, auth, clearUserIntent, getAccounts, getRelationship, getTransactions,
+import { activeSession, auth, clearUserIntent, getAccounts, getRelationship, getTransactionPage,
   pendingIntents, type Account, type Relationship, type Session, type Transaction } from './api/client';
 import { AccountsPage } from './features/accounts/AccountsPage';
 import { LoginForm } from './features/auth/LoginForm';
 import { RelationshipPage } from './features/relationship/RelationshipPage';
 import { TransactionsPage } from './features/transactions/TransactionsPage';
 import { ImportsPage } from './features/imports/ImportsPage';
-import { money } from './lib/format';
+import { OverviewPage } from './features/overview/OverviewPage';
 
 type Page = 'home' | 'accounts' | 'transactions' | 'imports' | 'me';
 const pages: [Page, string][] = [['home', '首页'], ['accounts', '账户'], ['transactions', '账单'], ['imports', '导入'], ['me', '我的']];
@@ -23,6 +23,7 @@ export function App() {
   const [message, setMessage] = useState('');
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactionsNext,setTransactionsNext]=useState<string|null>(null);
   const [relationship, setRelationship] = useState<Relationship | null>(null);
   const [username, setUsername] = useState('');
   const [refreshSequence, setRefreshSequence] = useState(0);
@@ -34,14 +35,18 @@ export function App() {
       .finally(() => setLoading(false));
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
+  useEffect(()=>{const expired=()=>{setSession(null);setAccounts([]);setTransactions([]);setRelationship(null);setUsername('');
+    setMessage('登录已过期，请重新登录。未确认操作仍保留。');location.hash='#/me';};
+    window.addEventListener('sl-session-expired',expired);return()=>window.removeEventListener('sl-session-expired',expired);
+  },[]);
 
   async function refresh(current: Session) {
-    // The first authenticated call provisions this identity once if needed.
+    // Reads remain read-only; the first write provisions an identity if needed.
     const nextRelationship = await getRelationship(current);
-    const [nextAccounts, nextTransactions] = await Promise.all([getAccounts(current), getTransactions(current)]);
+    const [nextAccounts, nextTransactions] = await Promise.all([getAccounts(current), getTransactionPage(current)]);
     setRelationship(nextRelationship);
     setAccounts(nextAccounts);
-    setTransactions(nextTransactions);
+    setTransactions(nextTransactions.data);setTransactionsNext(nextTransactions.page.next_cursor);
     setRefreshSequence((value) => value + 1);
   }
 
@@ -70,6 +75,7 @@ export function App() {
             bound={relationship?.status === 'bound'} refreshSequence={refreshSequence}
             onSaved={() => refresh(session)} onMessage={setMessage} />}
           {page === 'transactions' && <TransactionsPage session={session} accounts={accounts} transactions={transactions}
+            nextCursor={transactionsNext}
             bound={relationship?.status === 'bound'} refreshSequence={refreshSequence}
             onSaved={() => refresh(session)} onMessage={setMessage} />}
           {page === 'me' && <><RelationshipPage session={session} relationship={relationship}
@@ -80,10 +86,7 @@ export function App() {
               }}>我已核对，取消未确认操作</button></p>}
               <button className="secondary" onClick={logout}>退出登录</button>
             </section></>}
-          {page === 'home' && <section className="card"><h1>当前资金</h1>
-            <p className="balance">{money(accounts.reduce((sum, account) => sum + account.balance_minor, 0))}</p>
-            <p className="muted">只汇总本人的实际账户；对象资金另行查看。</p>
-          </section>}
+          {page === 'home' && <OverviewPage session={session} refreshSequence={refreshSequence} onMessage={setMessage}/>}
           {page === 'imports' && <ImportsPage session={session} accounts={accounts} transactions={transactions}
             onSaved={()=>refresh(session)} onMessage={setMessage}/>}
         </>}

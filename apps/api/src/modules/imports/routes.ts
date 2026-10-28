@@ -1,17 +1,18 @@
 import type { Express } from 'express';
 import multer from 'multer';
 import { DomainError } from '../../domain/ledger.js';
-import { contractInput } from '../../domain/contracts.js';
+import { contractInput,contractQuery } from '../../domain/contracts.js';
 import { actor, key, payloadHash, route, rpc } from '../../http/request.js';
 import { parseOfficialFile } from './parser.js';
 
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:10*1024*1024,files:1,fields:1,fieldSize:256,parts:2}});
 function page(req: {query:Record<string,unknown>}) {
-  const q=req.query;
+  const parsed={...req.query};if(typeof parsed.limit==='string'&&/^\d+$/.test(parsed.limit))parsed.limit=Number(parsed.limit);
+  const q=contractQuery('getImport',parsed);
   if(Object.keys(q).some(k=>!['limit','rows_cursor','reconciliation_cursor'].includes(k)))throw new DomainError(422,'VALIDATION_ERROR','分页参数不合法。');
   const number=(value:unknown,fallback:number,max:number)=>{if(value===undefined)return fallback;
     if(typeof value!=='string'||!/^\d+$/.test(value)||!Number.isSafeInteger(Number(value))||Number(value)>max)throw new DomainError(422,'VALIDATION_ERROR','分页参数不合法。');return Number(value);};
-  const limit=number(q.limit,50,200);if(!limit)throw new DomainError(422,'VALIDATION_ERROR','分页数量至少为1。');
+  const limit=q.limit??50;if(!Number.isInteger(limit)||limit<1||limit>100)throw new DomainError(422,'VALIDATION_ERROR','分页数量须为1到100。');
   return {p_limit:limit,p_rows:number(q.rows_cursor,0,10000),p_reconciliation:number(q.reconciliation_cursor,0,Number.MAX_SAFE_INTEGER)};
 }
 export function registerImportRoutes(app:Express) {
