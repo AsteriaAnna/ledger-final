@@ -7,6 +7,7 @@ import { registerTransactionRoutes } from '../modules/transactions/routes.js';
 import type { AuthRequest } from './request.js';
 import { registerImportRoutes } from '../modules/imports/routes.js';
 import { registerOverviewRoutes } from '../modules/overview/routes.js';
+import { registerWeb } from './web.js';
 
 export const app = express();
 app.disable('x-powered-by');
@@ -23,9 +24,10 @@ app.use((req, res, next) => {
   if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
   next();
 });
-app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
+app.get('/healthz', (_req, res) => res.setHeader('Cache-Control','no-store').json({ status: 'ok' }));
 
-app.use('/api/v1', async (req: AuthRequest, _res, next) => {
+app.use('/api/v1', async (req: AuthRequest, res, next) => {
+  res.setHeader('Cache-Control','no-store');
   try {
     const header = req.get('Authorization') ?? '';
     if (!header.startsWith('Bearer ')) throw new DomainError(401, 'UNAUTHENTICATED', '请先登录。');
@@ -42,6 +44,7 @@ registerTransactionRoutes(app);
 registerImportRoutes(app);
 registerOverviewRoutes(app);
 app.use('/api/v1',(_req,res)=>res.status(404).json({code:'RESOURCE_NOT_FOUND',message:'目标不存在。'}));
+registerWeb(app,process.env.WEB_DIST_PATH);
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (error instanceof DomainError) { res.status(error.status).json({ code: error.code, message: error.message }); return; }

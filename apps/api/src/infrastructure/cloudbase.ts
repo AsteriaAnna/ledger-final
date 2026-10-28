@@ -2,6 +2,9 @@ import { DomainError } from '../domain/ledger.js';
 
 const envId = process.env.CLOUDBASE_ENV_ID;
 const apiKey = process.env.CLOUDBASE_API_KEY;
+// Leave room inside the documented 60s ingress limit for Auth and XLSX parsing.
+// This is a waiting budget, not proof that the 10000-row upper bound is met.
+const longWrites = new Set(['sl_import_upload','sl_import_resolve','sl_review_reconciliation']);
 class ProvisioningRequired extends Error {}
 
 function gateway(): string {
@@ -72,7 +75,7 @@ async function callRpcRaw<T>(name: string, args: Record<string, unknown>): Promi
     response = await fetch(`${gateway()}/v1/rdb/rest/rpc/${name}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(args), signal: AbortSignal.timeout(12000),
+      body: JSON.stringify(args), signal: AbortSignal.timeout(longWrites.has(name)?45000:12000),
     });
   } catch { throw new DomainError(500, 'INTERNAL_ERROR', '暂时无法读取账本。'); }
   const result = await responseJson(response);

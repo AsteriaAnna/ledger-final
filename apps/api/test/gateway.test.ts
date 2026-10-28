@@ -59,3 +59,18 @@ test('first write provisions once and retries the original RPC once', async (t) 
   assert.deepEqual(fetchMock.mock.calls.map(item => String(item.arguments[0]).split('/').at(-1)),
     ['sl_create_account', 'sl_provision_user', 'sl_create_account']);
 });
+
+test('an interrupted import is not retried automatically and keeps its explicit retry arguments',async t=>{
+  const budgets:number[]=[];const bodies:string[]=[];let interrupted=true;
+  t.mock.method(AbortSignal,'timeout',(ms:number)=>{budgets.push(ms);return new AbortController().signal;});
+  t.mock.method(globalThis,'fetch',async(_url:Parameters<typeof fetch>[0],init?:RequestInit)=>{
+    bodies.push(String(init?.body));if(interrupted)throw new DOMException('synthetic interrupted response','AbortError');
+    return new Response(JSON.stringify({saved:true}));
+  });
+  const args={p_actor_subject:'synthetic',p_key_digest:'same-request',p_payload_hash:'same-content'};
+  await assert.rejects(callRpc('sl_import_upload',args),e=>e instanceof DomainError&&e.status===500);
+  assert.equal(bodies.length,1,'Do not repeat a write whose outcome is unknown');
+  interrupted=false;assert.deepEqual(await callRpc('sl_import_upload',args),{saved:true});assert.equal(bodies[0],bodies[1]);
+  await callRpc('sl_accounts_page',{p_actor_subject:'synthetic',p_view:'mine'});
+  assert.deepEqual(budgets,[45000,45000,12000]);
+});
