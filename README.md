@@ -10,6 +10,8 @@
 
 `apps/api/src/http`放认证与HTTP入口，`apps/api/src/modules`按关系、账户、交易分开，`apps/api/src/domain`放输入规则与业务错误，`apps/api/src/infrastructure`接CloudBase。M2资金处理在受限PG函数中由账户/交易入口共用，不保留另一套未接入运行的TS扣减算法。`apps/web/src/features`按页面功能拆分，`apps/web/src/api`集中调用业务API；数据库变更放`cloudbase/migrations`，真实数据库用例放`tests/integration`，公开响应结构校验放`tests/contract`。
 
+运行配置、发布包、费用阻塞与独立恢复步骤见[运行维护](docs/OPERATIONS.md)。恢复工具单独放`tools/recovery`，不进入应用运行依赖；私有备份和合成运行结果留在忽略目录。
+
 ## 六份核心设计入口
 
 | 文档 | 唯一职责 |

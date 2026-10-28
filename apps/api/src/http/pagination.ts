@@ -4,7 +4,7 @@ import {contractQuery} from '../domain/contracts.js';
 type Position={time:string;id:string};
 const bad=()=>new DomainError(422,'VALIDATION_ERROR','筛选或分页位置不合法，请重新查询。');
 function signature(text:string){
-  const secret=process.env.CURSOR_SECRET??process.env.CLOUDBASE_API_KEY;
+  const secret=process.env.CURSOR_SECRET||process.env.CLOUDBASE_API_KEY;
   if(!secret)throw new Error('Stable CURSOR_SECRET is required for pagination');
   return createHmac('sha256',secret).update(text).digest('base64url');
 }

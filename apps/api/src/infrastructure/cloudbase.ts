@@ -1,5 +1,4 @@
 import { DomainError } from '../domain/ledger.js';
-import cloudbase from '@cloudbase/js-sdk';
 
 const envId = process.env.CLOUDBASE_ENV_ID;
 const apiKey = process.env.CLOUDBASE_API_KEY;
@@ -23,6 +22,7 @@ export async function verifyAccessToken(token: string): Promise<{ subject: strin
       headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000),
     });
   } catch { throw new DomainError(500, 'INTERNAL_ERROR', '登录状态暂时无法验证。'); }
+  if (response.status>=500 || response.status===429) throw new DomainError(500,'INTERNAL_ERROR','登录服务暂时不可用，请稍后重试。');
   if (!response.ok) throw new DomainError(401, 'UNAUTHENTICATED', '请重新登录。');
   const profile = await responseJson(response);
   if (!profile || typeof profile !== 'object' || !('sub' in profile) || typeof profile.sub !== 'string' || !profile.sub) {
@@ -65,18 +65,7 @@ export async function callRpc<T>(name: string, args: Record<string, unknown>, di
 
 async function callRpcRaw<T>(name: string, args: Record<string, unknown>): Promise<T> {
   if (!apiKey) {
-    // CloudBase Run reads its own short-lived credentials from the runtime.
-    // This path cannot be exercised from an unconfigured local process.
-    try {
-      const sdk = cloudbase.init({ env: envId!, region: 'ap-shanghai' });
-      // SDK 3.10.4 runtime has PG rpc(), while its Node declaration still labels rdb() as MySqlClient.
-      const pg = sdk.rdb() as unknown as { rpc: (fn: string, input: Record<string, unknown>) => Promise<{ data: unknown; error?: Error }> };
-      const { data, error } = await pg.rpc(name, args);
-      if (error) throw error;
-      return data as T;
-    } catch (error) {
-      throw mapRpcError(error);
-    }
+    throw new Error('CLOUDBASE_API_KEY is required; implicit runtime credentials are not supported');
   }
   let response: Response;
   try {

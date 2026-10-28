@@ -4,7 +4,13 @@ import { DomainError } from '../src/domain/ledger.js';
 
 process.env.CLOUDBASE_ENV_ID = 'synthetic-contract-test';
 process.env.CLOUDBASE_API_KEY = 'synthetic-test-key';
-const { callRpc } = await import('../src/infrastructure/cloudbase.js');
+const { callRpc,verifyAccessToken } = await import('../src/infrastructure/cloudbase.js');
+
+test('temporary Auth outage does not masquerade as an expired user session',async t=>{
+  let status=503;t.mock.method(globalThis,'fetch',async()=>new Response('{}',{status}));
+  for(const code of [503,429]){status=code;await assert.rejects(verifyAccessToken('synthetic'),e=>e instanceof DomainError&&e.status===500);}
+  status=401;await assert.rejects(verifyAccessToken('synthetic'),e=>e instanceof DomainError&&e.status===401);
+});
 
 test('provider failures map to the published error codes and statuses', async (t) => {
   let providerMessage = '';

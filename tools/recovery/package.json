@@ -1,0 +1,7 @@
+{
+  "name": "@ledger/recovery-tools",
+  "private": true,
+  "type": "module",
+  "scripts": { "verify": "node verify.mjs" },
+  "dependencies": { "@electric-sql/pglite": "0.5.12" }
+}
