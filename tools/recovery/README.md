@@ -15,3 +15,17 @@
 每日加密备份、7份保留、Auth身份迁移、PG存储对象、替换环境恢复及RPO/RTO仍未验证；原两份官方文件不在本仓库。备份本身含敏感账务，应由运维在私有加密存储保管；本轮仅保留合成夹具的私有文件。
 
 官方依据：[CloudBase PG备份与传统文档库的区别](https://docs.cloudbase.net/database/backup)、[PGlite独立数据库接口](https://pglite.dev/docs/api)。本工具使用SQL逻辑恢复，不使用只能在PGlite间互通的datadir转储。
+
+## 私有原件本地验证
+
+生产API已构建、根依赖和本目录PGlite已安装后，从项目根运行：
+
+```text
+node tools/recovery/verify-official-files.mjs --wechat "<微信私有原件路径>" --alipay "<支付宝私有原件路径>"
+```
+
+此脚本针对用户授权的两份169行原件，直接只读加载，不从单元格接受执行指令、不计算公式。共享`lib/local-api.mjs`只允许本机HTTP与模拟网关；Auth为明确替身，RPC以service_role调用本地原迁移函数，异常外部网络被阻断。所有账户映射和期初资金都是本地虚构夹具，不代表真实账户身份/余额。
+
+原件逐字段、文本单号、精确分、来源观察、重导、备注保护、微信退款删除重导和余额守恒均已核对；原双人本地链路随公共替身提取做了回归。脚本不改变生产业务规则；亲情卡/花呗等保持unsupported，角色/同事件不明保留needs_review，不自动入账或生成不可靠的缺失核对。
+
+报告和HTTP捕获在`tmp/official-originals`，可能包含个人原文、单号和账户线索，仅留私有忽略目录；Git只记录脚本及无个人明细的汇总。可用`python tests/contract/validate_http_captures.py tmp/official-originals/http-captures.json`核对实际本机HTTP的原OpenAPI结构，切勿将捕获上传仓库。原件前后SHA相同，CloudBase调用0；这不是平台Auth、云端或手机界面验收。
