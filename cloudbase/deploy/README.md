@@ -20,7 +20,13 @@ API可通过`WEB_DIST_PATH`提供本次发布的网页：只开放首页和`asse
 
 Dockerfile位于此目录，构建上下文必须是仓库根目录。例如使用Docker时，指定`-f cloudbase/deploy/Dockerfile`，传公开构建参数`VITE_CLOUDBASE_ENV_ID`、`VITE_PUBLISHABLE_KEY`，构建根目录`.`。根`.dockerignore`按白名单排除私有配置、node_modules、备份和临时文件。镜像分构建/运行阶段，运行阶段只装API生产依赖，使用非root用户、9000端口和不读数据库的`/healthz`探针。
 
-候选平台配置仍是同一`writter-dev`下单服务、0.25核/0.5GiB、最小实例0/最大1；保持超限按量关闭，不自动创建环境、变配或购买常驻资源。这些是准备参数，**没有在平台应用或验证**。本机无Docker/Podman，因此不能将Node运行包验证写成镜像构建通过，基础镜像实际拉取、Linux运行和平台路由仍待验。
+候选平台配置保存于`cloudrun.template.json`：同一`writter-dev`下单服务`xingzhang`、0.25核/0.5GiB、最小实例0/最大1、9000端口。保持超限按量关闭，不创建第二个环境、不改套餐。模板内两个私有变量占位符必须在部署调用前私下注入，不可直接拿占位符上线。
+
+公开仓库标准Ubuntu运行机已实际构建并隔离运行Docker镜像，[成功记录](https://github.com/AsteriaAnna/ledger-final/actions/runs/40705023724)。运行非root、只读、无外部网络，限制0.25CPU/512MiB；核对页面、资源、固定健康、API401/JSON、私有文件404及SIGTERM退出0。基础镜像digest固定于该次实测值。该检查没有平台登录、账务或CloudBase网络，云端开通/实际平台路由仍待验。
+
+工作树干净且Web私有配置的公开env ID/publishable key有效时，运行`node tools/release/prepare-context.mjs tmp/production-context-<唯一名称>`。只从已提交白名单复制源码，把公开Web配置写入Docker ARG默认值，生成提交SHA、tree及逐文件摘要。它不读取后端Key、不部署、不复制账单/备份/测试替身。正式Key和稳定随机`CURSOR_SECRET`只通过运行时配置注入。
+
+2026-10-28正式开通被自动审批拦下：本机插件可登录并已绑定writter-dev，但`initEnv`的持久变更/资源点风险需要具体确认。环境仍unopened，来源域名、正式双人账号与密钥尚未投入运行，不把名义域名当上线入口。
 
 ## 本地验证
 

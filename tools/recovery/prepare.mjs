@@ -1,14 +1,10 @@
-import {readFile,writeFile,mkdir,readdir} from 'node:fs/promises';
-import {createHash} from 'node:crypto';
+import {writeFile,mkdir} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
-import {tables,schemaSql,rowsSql} from './catalog.mjs';
+import {exportSql} from './lib/snapshot.mjs';
 import {officialWorkbook,wxRow} from '../../apps/api/test-dist/test/fixtures/official.js';
 import {parseOfficialFile} from '../../apps/api/dist/modules/imports/parser.js';
 const root=fileURLToPath(new URL('../../',import.meta.url)),dir=resolve(root,'tmp/recovery');await mkdir(dir,{recursive:true});
-const manifest=[];for(const name of (await readdir(resolve(root,'cloudbase/migrations'))).filter(n=>n.endsWith('.sql')).sort()){
- const data=(await readFile(resolve(root,'cloudbase/migrations',name),'utf8')).replaceAll('\r\n','\n');manifest.push({name,sha256:createHash('sha256').update(data).digest('hex')});
-}
 const parsed=await parseOfficialFile(await officialWorkbook('wechat',[wxRow('recovery-expense','商户消费','支出','12.34'),
  wxRow('recovery-refund','商户退款','收入','0.44')]),'synthetic-recovery.xlsx');
 const literal=value=>"'"+JSON.stringify(value).replaceAll("'","''")+"'::jsonb";
@@ -32,8 +28,5 @@ BEGIN
  INSERT INTO public.sl_reconciliation_items(profile_id,transaction_id,first_batch_id,last_batch_id) VALUES(profile,(r->'transaction'->>'id')::uuid,(batch->'data'->>'batch_id')::uuid,(batch->'data'->>'batch_id')::uuid);
  PERFORM public.sl_put_budget(s,'2026-10','{"budget_minor":5000,"expected_version":0}'::jsonb);
 END $$;`);
-await writeFile(resolve(dir,'export.sql'),`SELECT jsonb_build_object('format','star-ledger-logical-v1','environment','writter-dev-d0g7h1prq4ce60665',
- 'captured_at',now(),'timezone',current_setting('TimeZone'),'migrations',${literal(manifest)},'schema',(${schemaSql}),
- 'tables',jsonb_build_object(${tables.map(t=>`'${t}',(${rowsSql(t)})`).join(',')}),
- 'sequence',jsonb_build_object('last_value',(SELECT last_value::text FROM public.sl_replay_order_seq),'is_called',(SELECT is_called FROM public.sl_replay_order_seq)))::text AS snapshot;`);
+await writeFile(resolve(dir,'export.sql'),await exportSql(root));
 console.log('Prepared one scoped synthetic fixture and one consistent application export. No cloud operation executed.');

@@ -35,3 +35,9 @@ node tools/recovery/verify-official-files.mjs --wechat "<微信私有原件路�
 `node tools/recovery/verify-mobile.mjs`用Playwright Chromium的320/390像素触摸视口操作真实React页面、本机Express和原迁移PGlite。先构建API并执行其测试以生成官方合成文件夹具；安装本目录依赖。Playwright从普通Node依赖解析，桌面内置组件可用`LEDGER_BROWSER_TOOLS_ROOT`指定其node_modules目录，`LEDGER_CHROMIUM_PATH`可指定已安装的浏览器。
 
 验证器关闭Vite私有env文件加载，仅在自己的Vite实例将SDK别名指向`fixtures/browser-auth.mjs`。登录成功/失败、开户重读、资料/份额/期初修改、支出编辑刷新删除、合成官方文件的档案/映射/不支持保留、预算刷新和退出共9条路径通过，16个截图检查导航目标完整显示及无整页横向溢出。浏览器仅允许本机来源，Node网关也阻断异常外部请求；不创建真实用户或上传个人文件，不代表真实CloudBase登录或iOS Safari真机验收。截图和报告留在忽略目录`tmp/mobile`。正式构建不引用该SDK替身，Docker检查另断言替身标识没有进入镜像。
+
+## 加密快照与通用恢复
+
+`backup.mjs`提供`export-sql/create-key/seal/open/verify`，命令及正式维护安排见[运行维护](../../docs/OPERATIONS.md#备份和故障恢复安排)。不连接云、不加载应用私有env、不向源库写夹具。`verify <密文.slbak> <私有Key>`在内存独立PGlite恢复匹配版本的任意合法快照，比较16份迁移、17表、函数/权限和每一行；它不套用旧合成账本的固定余额，也不将数据写回云。导出与两种恢复检查共用`lib/snapshot.mjs`。
+
+原69611字节合成快照已实际密封、解密字节相等、独立恢复通过；原`verify.mjs`在共用实现下恢复后写入/幂等预期仍通过。`node --test tools/recovery/backup.test.mjs`另检查错误Key、篡改和拒绝覆盖。测试密钥及密文在忽略目录，不是用户正式恢复Key或首份生产备份。正式使用前仍需离线Key、已验证密文的异地副本及Auth/平台恢复安排；不自动清理旧快照或配置付费备份服务。

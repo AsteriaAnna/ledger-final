@@ -1,5 +1,5 @@
 # Build context: repository root. Only public Web configuration belongs in ARGs.
-FROM node:24-bookworm-slim AS build
+FROM node:24-bookworm-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
@@ -17,7 +17,7 @@ ARG VITE_CLOUDBASE_REGION=ap-shanghai
 RUN test -n "$VITE_CLOUDBASE_ENV_ID" && test -n "$VITE_PUBLISHABLE_KEY"
 RUN npm run build
 
-FROM node:24-bookworm-slim AS runtime
+FROM node:24-bookworm-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c AS runtime
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
