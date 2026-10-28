@@ -1,0 +1,22 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,writeFile,readFile,mkdir} from 'node:fs/promises';
+import {execFileSync,spawnSync} from 'node:child_process';
+import {resolve} from 'node:path';
+const root=resolve(import.meta.dirname,'../..');
+test('encrypted backups reject a wrong key, tampering and overwriting existing files',async()=>{
+  await mkdir(resolve(root,'tmp'),{recursive:true});const dir=await mkdtemp(resolve(root,'tmp/backup-integrity-'));
+  const file=name=>resolve(dir,name),script=resolve(root,'tools/recovery/backup.mjs');
+  const run=(...args)=>execFileSync(process.execPath,[script,...args],{cwd:root,stdio:'pipe'});
+  const fails=(...args)=>assert.equal(spawnSync(process.execPath,[script,...args],{cwd:root,stdio:'pipe'}).status,1);
+  const raw=JSON.stringify({format:'star-ledger-logical-v1',private:'Synthetic secret must never appear in ciphertext'});
+  await writeFile(file('source.json'),raw);run('create-key',file('one.key'));run('create-key',file('two.key'));
+  run('seal',file('source.json'),file('one.slbak'),file('one.key'));
+  const original=await readFile(file('one.slbak'),'utf8');assert.ok(!original.includes('Synthetic secret'));
+  run('open',file('one.slbak'),file('opened.json'),file('one.key'));assert.equal(await readFile(file('opened.json'),'utf8'),raw);
+  fails('open',file('one.slbak'),file('wrong.json'),file('two.key'));
+  const tampered=JSON.parse(original),bytes=Buffer.from(tampered.ciphertext,'base64');bytes[0]^=1;tampered.ciphertext=bytes.toString('base64');
+  await writeFile(file('tampered.slbak'),JSON.stringify(tampered));fails('open',file('tampered.slbak'),file('bad.json'),file('one.key'));
+  fails('seal',file('source.json'),file('one.slbak'),file('one.key'));assert.equal(await readFile(file('one.slbak'),'utf8'),original);
+  fails('create-key',file('one.key'));
+});

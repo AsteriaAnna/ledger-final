@@ -69,7 +69,7 @@ account_type统一命名；accounting_semantics由type固定派生并只在响�
 
 Transaction响应区分income/expense/transfer/refund四种封闭结构，含派生semantics、version、read_only和source_summaries；对象视图source_summaries为空。Mutation响应含transaction、account_effects、account_changes、affected_months、notices。历史端effect为historical_only，无有效资金变动。退款源时间只读，抵减开关不动余额；不跨起始日改日期保留份额计划，跨起始日会切换当前余额影响。改金额/账户或删除不能安全撤销则409，全字段保留原状态。
 
-Account返回完整opening_state供初始状态编辑，无需用户记住原始分配；当前余额/份额是计算结果。holder/custodian/fund_owner均相对当前登录查看者，内部保留真实用户ID；对象账户可显示其本人流动份额，但本人账户不允许配置对象流动份额。
+Account返回完整opening_state供初始状态编辑，无需用户记住原始分配；当前余额/份额是计算结果。holder/custodian/fund_owner均相对当前登录查看者，内部保留真实用户ID；对象账户可显示其本人流动份额，但本人账户不允许配置对象流动份额。机器结构用OpeningStateView表达读取投影，开户/初始状态修正仍用OpeningState约束写入，禁止把读取到的对象流动份额直接用于本人账户写入。
 
 ImportResponse含全批summary、coverage、profile候选及profile_version、分页rows/核对项。每行包含原始证据（含canonical_method_keys）、候选与缺失原因、source_version、transaction_id和allowed_actions；候选不是正式账单。Candidate返回单账户canonical_method_key或两端from_canonical_method_key/to_canonical_method_key，未定端为null；Evidence保留所有规范键，角色未定时不猜两端。客户端原样提交键到映射接口，不重新解析名称。batch.source_metadata展示本人文件头证据。七类行结果之和必须等于实读数，核对项另计。字段字典与真实样本限制见模块边界。
 
@@ -243,6 +243,7 @@ ImportResponse含全批summary、coverage、profile候选及profile_version、�
 成功返回：data：Account。嵌套字段、必填与互斥组合见[严格结构](../openapi.yaml)。
 
 - 副作用：整体替换初始状态、重建本账户受影响资金与历史/有效状态，其他账户和交易事实不改。
+- 重建顺序：以新初始份额为起点，按当前交易记账时间/原分配操作时间、首次执行顺序重放本账户事件；普通编辑保留首次顺序。起始日前的交易只保留历史影响，分配原指令保留但不生成当前资金变动；重新提前起始日可再启用。空改动按份额含义比较，不因数组排序或省略零份额新增版本。
 - 异常与边界：不能安全重建409 OPENING_STATE_RECALCULATION_CONFLICT并全部不生效；空改动version不变，不提供直接覆盖当前余额。
 - 失败：本操作列出HTTP 400/401/403/404/409/412/422/428/500；统一Error；认证/字段/权限/前置版本失败不写业务数据。内部行执行结果与HTTP请求错误分开。
 - 流程验收：正常路径检查以上副作用；非法字段/他人资源不变更；重复提交按本操作重试边界；版本冲突不覆盖；资金操作在故障时无半笔账。对应动作与真实字段验证见实施计划。

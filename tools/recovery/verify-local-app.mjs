@@ -1,0 +1,41 @@
+// Offline HTTP -> original RPC -> local PostgreSQL check. Auth is a local substitute.
+import assert from 'node:assert/strict';
+import {writeFile,mkdir} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {startLocalApi} from './lib/local-api.mjs';
+const {root,pg,origin,counters,close}=await startLocalApi();
+const captures=[];
+try{
+  const shell=await fetch(origin+'/');assert.equal(shell.status,200);const html=await shell.text();
+  const asset=html.match(/src="([^"]+\.js)"/);assert.ok(asset);assert.equal((await fetch(origin+asset[1])).status,200);
+  async function req(operationId,path,{user='a',method='GET',body,status=200,headers={}}={}){
+    const r=await fetch(origin+'/api/v1'+path,{method,headers:{Authorization:'Bearer local-only-'+user,'Content-Type':'application/json',...headers},body:body===undefined?undefined:JSON.stringify(body)});
+    const response=await r.json();assert.equal(r.status,status,operationId+': '+JSON.stringify(response));assert.equal(r.headers.get('cache-control'),'no-store');
+    captures.push({operationId,status:r.status,response,...(body===undefined?{}:{request:body})});return response.data;
+  }
+  assert.deepEqual(await req('listAccounts','/accounts'),[]);
+  assert.equal((await pg.query('SELECT count(*)::integer AS n FROM public.sl_users')).rows[0].n,0,'Read must not provision a user');
+  const today=new Date(Date.now()+8*3600000).toISOString().slice(0,10);
+  const account=await req('createAccount','/accounts',{method:'POST',status:201,headers:{'Idempotency-Key':'local-account'},body:{
+    name:'Local release account',account_type:'cash',custodian:'self',opening_state:{opening_date:today,opening_balance_minor:10000,
+      opening_allocations:[{fund_owner:'self',fund_type:'liquid',amount_minor:10000}]}}});
+  const expense={type:'expense',account_id:account.id,amount_minor:2580,occurred_at:today+'T00:00:00+08:00',category_code:'food',merchant:'Synthetic meal',note:''};
+  const first=await req('createTransaction','/transactions',{method:'POST',status:201,headers:{'Idempotency-Key':'local-expense'},body:expense});
+  const again=await req('createTransaction','/transactions',{method:'POST',status:201,headers:{'Idempotency-Key':'local-expense'},body:expense});
+  assert.equal(first.transaction.id,again.transaction.id);
+  const refreshed=await req('getAccount','/accounts/'+account.id);assert.equal(refreshed.balance_minor,7420);
+  const invitation=await req('createBindingInvitation','/relationship/invitations',{method:'POST',status:201,headers:{'Idempotency-Key':'local-invitation'},body:{}});
+  await req('bindRelationship','/relationship/binding',{user:'b',method:'POST',headers:{'Idempotency-Key':'local-binding'},body:{binding_token:invitation.binding_token}});
+  const partnerAccounts=await req('listAccounts','/accounts?view=partner',{user:'b'});assert.equal(partnerAccounts[0].read_only,true);assert.equal(partnerAccounts[0].balance_minor,7420);
+  await req('patchAccount','/accounts/'+account.id,{user:'b',method:'PATCH',status:404,headers:{'If-Match':'"'+refreshed.version+'"'},body:{name:'Must not overwrite'}});
+  assert.equal((await req('getAccount','/accounts/'+account.id)).name,'Local release account');
+  await req('putBudget','/budgets/'+today.slice(0,7),{method:'PUT',body:{budget_minor:5000,expected_version:0}});
+  const overview=await req('getOverview','/overview?month='+today.slice(0,7));assert.equal(overview.personal_spending.month_spent_minor,2580);assert.equal(overview.budget.remaining_minor,2420);
+  const summary={mode:'offline HTTP + original PG migrations; Auth/gateway explicitly mocked',cloud_network_requests:0,
+    static_shell_and_asset:true,http_captures:captures.length,mocked_auth_calls:counters.mocked_auth_calls,mocked_rpc_calls:counters.mocked_rpc_calls,
+    account_balance_minor:7420,transactions:(await pg.query('SELECT count(*)::integer AS n FROM public.sl_transactions')).rows[0].n,
+    partner_read_only_and_write_rejected:true,budget_remaining_minor:2420};assert.equal(summary.transactions,1);
+  await mkdir(resolve(root,'tmp'),{recursive:true});
+  await writeFile(resolve(root,'tmp/local-app-captures.json'),JSON.stringify(captures,null,2));
+  await writeFile(resolve(root,'tmp/local-app-verification.json'),JSON.stringify(summary,null,2)+'\n');console.log(JSON.stringify(summary,null,2));
+}catch(error){console.error(error.message);process.exitCode=1;}finally{await close();}

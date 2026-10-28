@@ -1,0 +1,16 @@
+{
+  "envId": "writter-dev-d0g7h1prq4ce60665",
+  "serverName": "xingzhang",
+  "serverType": "container",
+  "serverConfig": {
+    "Dockerfile": "cloudbase/deploy/Dockerfile",
+    "BuildDir": ".",
+    "Cpu": 0.25,
+    "Mem": 0.5,
+    "MinNum": 0,
+    "MaxNum": 1,
+    "Port": 9000,
+    "OpenAccessTypes": ["PUBLIC"],
+    "EnvParams": "{\"NODE_ENV\":\"production\",\"PORT\":\"9000\",\"WEB_DIST_PATH\":\"/app/apps/web/dist\",\"CLOUDBASE_ENV_ID\":\"writter-dev-d0g7h1prq4ce60665\",\"CLOUDBASE_API_KEY\":\"REPLACE_PRIVATELY_AT_RUNTIME\",\"CURSOR_SECRET\":\"REPLACE_WITH_PRIVATE_STABLE_RANDOM_VALUE\"}"
+  }
+}

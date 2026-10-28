@@ -4,9 +4,17 @@
 
 ## 当前状态
 
-核心设计已收敛，现有参考脚本用真实官方文件和虚构账户完成流程验证；**尚无已部署应用、生产API或数据库闭环**。不把文档和内存参考检查当成产品功能验收。
+核心设计已收敛。账户、双人绑定与对象只读、三类手动交易维护、官方XLSX导入与来源生命周期、独立退款、期初修正、统计预算和分页筛选已有Web/API代码和`writter-dev` PG迁移，24个公开操作均已接入。两份官方原件共338行已通过正式解析器→本机HTTP→原迁移PG的本地复测，未支持及待处理行原样保留；此次Auth/网关为本地替身，不消耗CloudBase资源点，不代表云端上限验收。当前继续发布与完整恢复，**产品上线尚未验收**。实际证据与剩余条件见[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)。
 
-## 只维护六份核心文档
+## 代码位置
+
+`apps/api/src/http`放认证与HTTP入口，`apps/api/src/modules`按关系、账户、交易分开，`apps/api/src/domain`放输入规则与业务错误，`apps/api/src/infrastructure`接CloudBase。M2资金处理在受限PG函数中由账户/交易入口共用，不保留另一套未接入运行的TS扣减算法。`apps/web/src/features`按页面功能拆分，`apps/web/src/api`集中调用业务API；数据库变更放`cloudbase/migrations`，真实数据库用例放`tests/integration`，公开响应结构校验放`tests/contract`。
+
+运行配置、发布包、费用阻塞与独立恢复步骤见[运行维护](docs/OPERATIONS.md)。恢复工具单独放`tools/recovery`，不进入应用运行依赖；私有备份和合成运行结果留在忽略目录。
+
+双人轻量部署可使用[同源Web/API运行包](cloudbase/deploy/README.md)，无需为网页新增另一个后端。手机320/390触摸视口全流程及真实Linux镜像构建/隔离运行已通过；正式云托管开通被自动审批拦下，尚无线上网址。所有数据验证均在本地或公开仓库免费标准Linux运行机，不调用CloudBase。候选发布版本`0.1.0-rc.1`，不是已上线版本。
+
+## 六份核心设计入口
 
 | 文档 | 唯一职责 |
 |---|---|
@@ -15,7 +23,7 @@
 | [逻辑模型](docs/LOGICAL_DATA_MODEL.md) | 实体、字段归属、资金真相、来源生命周期与不变量 |
 | [API契约](docs/API_CONTRACT.md) | 请求/响应、合法组合、恢复路径、权限与错误 |
 | [模块边界](docs/ENGINEERING_MODULE_BOUNDARIES.md) | M1–M5依赖、字段字典、解析规则、写入边界 |
-| [实施计划与验证](docs/IMPLEMENTATION_PLAN.md) | 当前状态、阶段、经典动作及真实字段验证、工程待验收项 |
+| [实施计划与验证](docs/IMPLEMENTATION_PLAN.md) | 当前进度、路线入口、技术选择、实际验证与待验收项 |
 
 业务规则→模型/API表达同一行为，模块边界约束实现。遇到具体冲突先纠正主责文档再同步引用，不维护平行备选规则。历史过程报告和版本记录不作为当前指令，需追溯时使用Git历史。
 
@@ -26,8 +34,10 @@
 M1–M5始终是业务模块，不是里程碑编号。每次实现任务限定主责、依赖、允许修改范围、验收；不重复扫描/重构全部项目，不创建第二套余额或保存逻辑。Git主干main，提交使用Conventional Commits。
 
 
-全部24个公开操作的职责、异常、副作用、边界与调用环节已写入六份核心文档；严格结构统一维护于[openapi.yaml](openapi.yaml)。产品功能包含全部operationId的Mermaid，模块边界包含真实字段到统一账务的数据流。采用单库事务、必要POST幂等及资源版本比较；当前仍未实现生产API，不新增过程报告。
+全部24个公开操作的职责、异常、副作用、边界与调用环节已写入六份核心文档；严格结构统一维护于[openapi.yaml](openapi.yaml)。产品功能包含全部operationId的Mermaid，模块边界包含真实字段到统一账务的数据流。现有实现覆盖M1–M5，路由集合检查与真实HTTP结构验证分开记录；应用账务已独立恢复、真实原件本地复测通过，正式托管、平台完整恢复及未测上限仍待验收。
 
 当前业务与24个API冻结于`524f2da`。开发起点已选定：React + TypeScript + Vite；Node.js + Express模块化单体；现有CloudBase共享PostgreSQL，通过HTTP API + RPC访问；CloudBase Auth；云托管与Web静态托管。单元/API契约/数据库集成验证各自检查对应边界。理由、原子提交、费用与备份待验证项见[实施计划§7](docs/IMPLEMENTATION_PLAN.md#7-当前选定技术组合与最小验证)。当前尚未部署，不需要兼容旧系统或默认升级数据库。
 
-整体工程路线采用Phase 0–7：施工基线→关键技术验证→工程骨架→身份账户→核心账务→官方导入→统计与完整体验→正式上线。阶段依赖、24个API归属、目标目录与退出标准统一见[实施计划§2](docs/IMPLEMENTATION_PLAN.md#2-v1整体工程路线)。当前Phase 0进行中；只确定总路线，尚未制作任务卡、初始化工程或执行云端验证。六份核心文档保持原路径，按实际需要再建立代码/任务目录。
+整体工程路线、阶段交付、各类依赖与24个API归属统一见[阶段交付与依赖](docs/PHASE_DELIVERIES_AND_DEPENDENCIES.md)。实际进度统一见[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)。
+
+当前从[实施计划§2.6](docs/IMPLEMENTATION_PLAN.md#26-阶段控制与当前进度)领取下一步工作。[阶段设计](docs/PHASE_DELIVERIES_AND_DEPENDENCIES.md)中的未实施内部函数、物理表、RPC及安装步骤仍是施工候选，不替代业务规则与OpenAPI。当前继续全流程、部署和独立恢复验证；每次只细化当前可交付的增量。

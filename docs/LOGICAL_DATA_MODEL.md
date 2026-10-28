@@ -11,8 +11,9 @@
 | RelationshipBinding | M1 | 双方用户、有效状态/时间；仅扩大明确读权限 |
 | Account | M2 | holder_user_id、custodian_user_id、name、account_type、opening_date、version；实际账户；不另存可写余额 |
 | Transaction | M3 | owner、type、accounting_semantics、amount_minor、occurred_at、category_code、merchant、note、可选source_account_profile_id、refund_kind、affects_spending、version |
-| TransactionAccountEffect | M3 | transaction、account、role、signed_amount_minor、status；applied或historical_only |
+| TransactionAccountEffect | M3 | transaction、account、role、signed_amount_minor、status、replay_order；applied或historical_only；同笔转账两端共用首次顺序，在各自账户内唯一，普通编辑和类型切换后保留 |
 | AccountFundMovement | M2 | account、fund_owner、fund_type、signed_amount_minor、reason、operation_group、可选effect、effective_at |
+| FundAdjustmentInstruction | M2 | account、from/to份额、amount_minor、occurred_at、replay_order；不可变的手动分配原指令，不保存另一份余额 |
 | SourceAccountProfile | M4 | owner、platform、label、可选账号指纹、metadata；昵称不作唯一身份 |
 | SourcePaymentMethodMapping | M4 | owner、profile、canonical_method_key、account_id、version；unique(profile,key) |
 | ImportBatch | M4 | owner、文件指纹、导出时间、声明范围/类型/行数、实读数、profile可空、status、profile_version、汇总 |
@@ -32,6 +33,8 @@ M2唯一拥有资金变动记录及扣减/回补/分配算法；M3拥有交易�
 reason仅需opening、manual_allocation、transaction。存款基准由opening+manual_allocation净额派生，缺口=max(基准−当前存款,0)，不另存目标存款。初始余额也是opening记录合计，不另维护一份金额。
 
 手动调整同账户净额为0；applied effect对应资金变动合计=effect金额；historical_only不生成资金变动。内部transfer两effects等额反向，每端独立判断起始日。当前交易的金额编辑调整其有效影响，不制造普通收入；无需事件溯源体系。
+
+分配原指令独立于当前有效movements保留，以支持初始状态修正；旧指令早于新起始日时仍保留但不生成当前资金记录。重建行为统一见API契约的putOpeningState，不从已删除的交易或旧幂等响应恢复账务事实。
 
 ## 3. 日期和退款
 

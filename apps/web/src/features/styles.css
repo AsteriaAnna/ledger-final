@@ -1,0 +1,7 @@
+.view-switch { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 20px; }
+.view-switch .active { background: #277058; }
+.view-switch button { padding: 9px 15px; min-height: 44px; flex-shrink: 0; }
+.invitation { display: grid; gap: 12px; margin: 18px 0 24px; }
+.invitation p { margin: 0; color: #50695a; }
+.invitation code { overflow-wrap: anywhere; padding: 12px; border-radius: 10px; background: #f3f5ef; }
+.invitation button { justify-self: start; }

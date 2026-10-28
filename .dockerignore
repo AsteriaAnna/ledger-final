@@ -1,0 +1,26 @@
+# Allow only files needed by cloudbase/deploy/Dockerfile into the build context.
+**
+!package.json
+!package-lock.json
+!openapi.yaml
+!apps/
+!apps/api/
+!apps/api/package.json
+!apps/api/tsconfig.json
+!apps/api/src/
+!apps/api/src/**
+!apps/web/
+!apps/web/package.json
+!apps/web/index.html
+!apps/web/tsconfig.json
+!apps/web/vite.config.ts
+!apps/web/src/
+!apps/web/src/**
+!cloudbase/
+!cloudbase/deploy/
+!cloudbase/deploy/Dockerfile
+# Explicit exclusions also apply if a secret is accidentally placed below src.
+**/.env*
+**/*.pem
+**/*.key
+**/node_modules/**
