@@ -1,0 +1,75 @@
+{
+  "release": "0.1.0-rc.1",
+  "status": "deployed_candidate",
+  "deployed_at": "2026-10-28T22:47:43+08:00",
+  "source_commit": "4f67fad560249d69968e4bc53239b4897b9ad6c8",
+  "source_tree": "806e5959153c62700172fe6996e68ec25cee05ca",
+  "environment": "writter-dev-d0g7h1prq4ce60665",
+  "region": "ap-shanghai",
+  "service": {
+    "name": "xingzhang",
+    "type": "container",
+    "cpu": 0.25,
+    "memory_gib": 0.5,
+    "min_instances": 0,
+    "max_instances": 1,
+    "port": 9000,
+    "deploy_id": "001",
+    "run_id": "multi_tenant_1xM4v7a54hK2Xb",
+    "build_id": 2609706949,
+    "traffic_percent": 100,
+    "image_digest": "sha256:abc2a99d6488559d9c65eb523cba575279ebfdaf6084e61db4a5b369c6e3540e"
+  },
+  "url": "https://xingzhang-337165-13-1428502724.sh.run.tcloudbase.com/",
+  "billing": {
+    "cloudbase_package": "baas_personal",
+    "deduction_mode": "credits",
+    "enable_overrun": false,
+    "auto_renew": false,
+    "package_expires": "2026-11-05T23:59:59+08:00"
+  },
+  "credentials": {
+    "backend_key_name": "sl-backend-prod",
+    "backend_key_expires": "2027-01-26T22:45:12+08:00",
+    "injected_at_runtime": true,
+    "formal_external_accounts": 2,
+    "formal_accounts_active": true,
+    "secrets_in_git": false,
+    "application_login_probe_performed": false
+  },
+  "origin": {
+    "security_domain": "xingzhang-337165-13-1428502724.sh.run.tcloudbase.com",
+    "status": "ENABLE",
+    "wildcard_added": false
+  },
+  "publication_check": {
+    "health_http_status": 200,
+    "health_body": {
+      "status": "ok"
+    },
+    "html_http_status": 200,
+    "javascript_http_status": 200,
+    "http_requests": 3,
+    "cloud_business_or_login_validation_calls": 0,
+    "observed_gateway_cache_control": "no-store, no-cache, must-revalidate, max-age=0"
+  },
+  "baseline_backup": {
+    "cloud_readonly_exports": 1,
+    "tables": 17,
+    "migrations": 16,
+    "business_rows": 0,
+    "auth_uid_mapping_recorded_privately": true,
+    "encrypted": "AES-256-GCM",
+    "independent_local_restore": "structure, functions, permissions and all rows match",
+    "offsite_copy": false,
+    "automatic_daily_backup_configured": false,
+    "auth_password_or_platform_snapshot_exported": false
+  },
+  "remaining": [
+    "First real user login and normal bookkeeping feedback",
+    "iOS physical device",
+    "Unverified 10MiB/10000-row cloud limit",
+    "Offsite backup custody and full platform recovery",
+    "Retire previous development key after first real use confirms new runtime credentials"
+  ]
+}

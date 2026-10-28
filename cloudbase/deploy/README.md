@@ -26,7 +26,9 @@ Dockerfile位于此目录，构建上下文必须是仓库根目录。例如使�
 
 工作树干净且Web私有配置的公开env ID/publishable key有效时，运行`node tools/release/prepare-context.mjs tmp/production-context-<唯一名称>`。只从已提交白名单复制源码，把公开Web配置写入Docker ARG默认值，生成提交SHA、tree及逐文件摘要。它不读取后端Key、不部署、不复制账单/备份/测试替身。正式Key和稳定随机`CURSOR_SECRET`只通过运行时配置注入。
 
-2026-10-28正式开通被自动审批拦下：本机插件可登录并已绑定writter-dev，但`initEnv`的持久变更/资源点风险需要具体确认。环境仍unopened，来源域名、正式双人账号与密钥尚未投入运行，不把名义域名当上线入口。
+2026-10-28先前开通被自动审批拦下；用户随后明确授权同一writter-dev开通及部署。CloudRun现已normal，候选`0.1.0-rc.1`源`4f67fad`部署为`xingzhang-001`并接管100%流量，网页/JS/固定健康均返回200。个人版/credits/EnableOverrun=false回读保持，规格和端口符合模板；没有改套餐或创建第二个环境。精确构建、镜像、来源和备份范围见[发布记录](releases/0.1.0-rc.1.json)。
+
+正式入口：[星账](https://xingzhang-337165-13-1428502724.sh.run.tcloudbase.com/)。该host的环境安全域名已回读ENABLE；保留原客户端会话策略，不添加通配来源。专用90天后端Key及稳定随机游标签名只经运行时注入，两个正式externalUser已创建并回读ACTIVE，口令只存本机私有文件。没有运行云端登录/记账探针，首次真实使用和iOS真机仍待反馈。实际网关对首页及指纹JS均覆盖为no-store；不把本地immutable头直接声称为线上缓存行为。
 
 ## 本地验证
 
