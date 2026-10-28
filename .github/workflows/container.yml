@@ -1,0 +1,52 @@
+name: Container build and Linux smoke
+on:
+  push:
+    branches: [main, feat/mobile-release-20261028]
+    paths:
+      - 'apps/**'
+      - 'cloudbase/deploy/**'
+      - 'tools/release/**'
+      - 'package*.json'
+      - '.dockerignore'
+      - '.github/workflows/container.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build without cloud credentials
+        run: |
+          docker build -f cloudbase/deploy/Dockerfile -t ledger-smoke:${{ github.sha }} \
+            --build-arg VITE_CLOUDBASE_ENV_ID=synthetic-local-only \
+            --build-arg VITE_PUBLISHABLE_KEY=synthetic-local-only-public-key .
+      - name: Run isolated Linux container
+        run: |
+          docker run -d --name ledger-smoke --network none --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop ALL \
+            --security-opt no-new-privileges --cpus 0.25 --memory 512m \
+            -e CLOUDBASE_ENV_ID=synthetic-local-only \
+            -e CLOUDBASE_API_KEY=synthetic-local-only-server-key \
+            -e CURSOR_SECRET=synthetic-local-only-pagination-secret \
+            ledger-smoke:${{ github.sha }}
+          for attempt in $(seq 1 20); do
+            if docker exec ledger-smoke node -e "fetch('http://127.0.0.1:9000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then break; fi
+            sleep 1
+          done
+          docker exec -i ledger-smoke node --input-type=module < tools/release/verify-container.mjs
+          docker stop --time 12 ledger-smoke
+          test "$(docker inspect --format '{{.State.ExitCode}}' ledger-smoke)" = 0
+      - name: Failure diagnostics
+        if: failure()
+        run: docker logs --tail 50 ledger-smoke || true
+      - name: Cleanup
+        if: always()
+        run: docker rm -f ledger-smoke 2>/dev/null || true

@@ -29,3 +29,9 @@ node tools/recovery/verify-official-files.mjs --wechat "<微信私有原件路�
 原件逐字段、文本单号、精确分、来源观察、重导、备注保护、微信退款删除重导和余额守恒均已核对；原双人本地链路随公共替身提取做了回归。脚本不改变生产业务规则；亲情卡/花呗等保持unsupported，角色/同事件不明保留needs_review，不自动入账或生成不可靠的缺失核对。
 
 报告和HTTP捕获在`tmp/official-originals`，可能包含个人原文、单号和账户线索，仅留私有忽略目录；Git只记录脚本及无个人明细的汇总。可用`python tests/contract/validate_http_captures.py tmp/official-originals/http-captures.json`核对实际本机HTTP的原OpenAPI结构，切勿将捕获上传仓库。原件前后SHA相同，CloudBase调用0；这不是平台Auth、云端或手机界面验收。
+
+## 手机页面本地检查
+
+`node tools/recovery/verify-mobile.mjs`用Playwright Chromium的320/390像素触摸视口操作真实React页面、本机Express和原迁移PGlite。先构建API并执行其测试以生成官方合成文件夹具；安装本目录依赖。Playwright从普通Node依赖解析，桌面内置组件可用`LEDGER_BROWSER_TOOLS_ROOT`指定其node_modules目录，`LEDGER_CHROMIUM_PATH`可指定已安装的浏览器。
+
+验证器关闭Vite私有env文件加载，仅在自己的Vite实例将SDK别名指向`fixtures/browser-auth.mjs`。登录成功/失败、开户重读、资料/份额/期初修改、支出编辑刷新删除、合成官方文件的档案/映射/不支持保留、预算刷新和退出共9条路径通过，16个截图检查导航目标完整显示及无整页横向溢出。浏览器仅允许本机来源，Node网关也阻断异常外部请求；不创建真实用户或上传个人文件，不代表真实CloudBase登录或iOS Safari真机验收。截图和报告留在忽略目录`tmp/mobile`。正式构建不引用该SDK替身，Docker检查另断言替身标识没有进入镜像。
