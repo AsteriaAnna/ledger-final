@@ -12,7 +12,9 @@ const js=await fetch(origin+asset[1]);assert.equal(js.status,200);assert.match(j
 const javascript=await js.text();assert.ok(!javascript.includes('synthetic-local-only-server-key'));
 assert.ok(!javascript.includes('ledger-local-browser-session'),'Local Auth substitute must not enter production image');
 assert.equal((await fetch(origin+'/api/v1/accounts')).status,401);
-for(const path of ['/api/v1/unknown','/.env','/package.json','/openapi.yaml','/src/main.tsx','/tmp/recovery/snapshot.json'])
+// API auth runs before routing, including unknown paths. It must never return HTML.
+const unknown=await fetch(origin+'/api/v1/unknown');assert.equal(unknown.status,401);assert.match(unknown.headers.get('content-type'),/application\/json/);
+for(const path of ['/.env','/package.json','/openapi.yaml','/src/main.tsx','/tmp/recovery/snapshot.json'])
   assert.equal((await fetch(origin+path)).status,404,path);
 await access('/app/openapi.yaml');await access('/app/apps/api/dist/server.js');
 for(const path of ['/app/apps/api/.env.local','/app/apps/web/.env.local','/app/tools/recovery','/app/tmp','/app/.git'])
