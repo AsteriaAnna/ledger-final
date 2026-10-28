@@ -5,6 +5,7 @@ import { AccountsPage } from './features/accounts/AccountsPage';
 import { LoginForm } from './features/auth/LoginForm';
 import { RelationshipPage } from './features/relationship/RelationshipPage';
 import { TransactionsPage } from './features/transactions/TransactionsPage';
+import { ImportsPage } from './features/imports/ImportsPage';
 import { money } from './lib/format';
 
 type Page = 'home' | 'accounts' | 'transactions' | 'imports' | 'me';
@@ -83,9 +84,8 @@ export function App() {
             <p className="balance">{money(accounts.reduce((sum, account) => sum + account.balance_minor, 0))}</p>
             <p className="muted">只汇总本人的实际账户；对象资金另行查看。</p>
           </section>}
-          {page === 'imports' && <section className="card"><h1>官方账单导入</h1>
-            <p>账户与手动记账链路完成后接入微信、支付宝官方文件。</p>
-          </section>}
+          {page === 'imports' && <ImportsPage session={session} accounts={accounts} transactions={transactions}
+            onSaved={()=>refresh(session)} onMessage={setMessage}/>}
         </>}
       {message && <p className="message" role="status">{message}</p>}
     </main>

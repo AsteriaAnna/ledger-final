@@ -108,7 +108,7 @@ M4保管源身份、原始字段、状态、优惠、渠道键和判定证据；
 
 ## 8. 程序中的数据依赖与提交位置
 
-当前参考程序只有parse_file、ImportReference、Ledger和stats，没有HTTP适配器。下图规定未来实现职责，不把参考脚本当成已有服务器。
+`experiments/verify_import_recognition.py`仍是内存参考程序，不作为生产执行入口。实际Web/API位于`apps`；M4解析器、HTTP适配及受限PG用例已接入。下图规定模块职责，不把参考脚本或未完成的模块当成已部署服务。
 
 ```mermaid
 flowchart TB

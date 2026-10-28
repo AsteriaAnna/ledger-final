@@ -79,19 +79,21 @@ export function parseAccount(input: unknown): AccountInput {
 export type ManualTransactionInput = ({ type: 'income' | 'expense'; account_id: string } |
   { type: 'transfer'; from_account_id: string; to_account_id: string }) & {
   amount_minor: number; occurred_at: string;
+  source_account_profile_id?: string;
   category_code: string; merchant: string; note: string;
 };
 
 export function parseManualTransaction(input: unknown): ManualTransactionInput {
   const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '收入、支出或转账内容不合法，请检查账户与金额。'); };
-  if (!object(input) || !allowed(input, ['type', 'account_id', 'from_account_id', 'to_account_id', 'amount_minor', 'occurred_at', 'category_code', 'merchant', 'note']) ||
+  if (!object(input) || !allowed(input, ['type', 'account_id', 'from_account_id', 'to_account_id', 'amount_minor', 'occurred_at', 'category_code', 'merchant', 'note', 'source_account_profile_id']) ||
     (input.type !== 'expense' && input.type !== 'income' && input.type !== 'transfer') ||
     !cents(input.amount_minor) || typeof input.occurred_at !== 'string' ||
     !/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/.test(input.occurred_at) ||
     Number.isNaN(Date.parse(input.occurred_at)) || Date.parse(input.occurred_at) > Date.now() ||
     (input.category_code !== undefined && !categories.has(String(input.category_code))) ||
     (input.merchant !== undefined && typeof input.merchant !== 'string') ||
-    (input.note !== undefined && typeof input.note !== 'string')) return bad();
+    (input.note !== undefined && typeof input.note !== 'string') ||
+    ('source_account_profile_id' in input && (typeof input.source_account_profile_id!=='string'||!input.source_account_profile_id))) return bad();
   let accounts: { type: 'income' | 'expense'; account_id: string } |
     { type: 'transfer'; from_account_id: string; to_account_id: string };
   if (input.type === 'transfer') {
@@ -104,6 +106,7 @@ export function parseManualTransaction(input: unknown): ManualTransactionInput {
   }
   return {
     ...accounts, amount_minor: input.amount_minor,
+    ...(typeof input.source_account_profile_id==='string'?{source_account_profile_id:input.source_account_profile_id}:{}),
     occurred_at: input.occurred_at, category_code: (input.category_code as string | undefined) ?? 'other',
     merchant: (input.merchant as string | undefined) ?? '', note: (input.note as string | undefined) ?? '',
   };
@@ -144,21 +147,22 @@ export function parseFundAdjustment(input: unknown): FundAdjustment {
 }
 
 export type ManualTransactionPatch = {
-  type?: 'income' | 'expense' | 'transfer'; source_account_profile_id?: null;
+  type?: 'income' | 'expense' | 'transfer'; source_account_profile_id?: string | null; affects_spending?: boolean;
   from_account_id?: string; to_account_id?: string;
   amount_minor?: number; occurred_at?: string; account_id?: string;
   category_code?: string; merchant?: string; note?: string;
 };
 export function parseManualTransactionPatch(input: unknown): ManualTransactionPatch {
   const bad = () => { throw new DomainError(422, 'VALIDATION_ERROR', '账单修改内容不合法。'); };
-  if (!object(input) || !allowed(input, ['type', 'amount_minor', 'occurred_at', 'account_id', 'from_account_id', 'to_account_id', 'category_code', 'merchant', 'note', 'source_account_profile_id'])) return bad();
+  if (!object(input) || !allowed(input, ['type', 'amount_minor', 'occurred_at', 'account_id', 'from_account_id', 'to_account_id', 'category_code', 'merchant', 'note', 'source_account_profile_id','affects_spending'])) return bad();
   if ('type' in input && input.type !== 'expense' && input.type !== 'income' && input.type !== 'transfer') return bad();
   const patch: ManualTransactionPatch = {};
   if (input.type === 'income' || input.type === 'expense' || input.type === 'transfer') patch.type = input.type;
   if ('source_account_profile_id' in input) {
-    if (input.source_account_profile_id !== null) return bad();
-    patch.source_account_profile_id = null;
+    if (input.source_account_profile_id !== null && (typeof input.source_account_profile_id!=='string'||!input.source_account_profile_id)) return bad();
+    patch.source_account_profile_id = input.source_account_profile_id;
   }
+  if ('affects_spending' in input) { if(typeof input.affects_spending!=='boolean')return bad();patch.affects_spending=input.affects_spending; }
   if ('amount_minor' in input) {
     if (!cents(input.amount_minor)) return bad();
     patch.amount_minor = input.amount_minor;

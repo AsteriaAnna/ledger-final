@@ -37,8 +37,9 @@ export async function callRpc<T>(name: string, args: Record<string, unknown>, di
   try {
     return await callRpcRaw<T>(name, args);
   } catch (error) {
+    const subject=args.p_actor_subject??args.p_subject;
     if (name === 'sl_provision_user' || !(error instanceof ProvisioningRequired) ||
-      typeof args.p_actor_subject !== 'string') throw error;
+      typeof subject !== 'string') throw error;
     // A fresh authenticated identity has an empty ledger. GET must not create it.
     if (name === 'sl_get_relationship') return {
       status: 'unbound', partner: null, permissions: { partner_accounts: 'none', partner_transactions: 'none' },
@@ -47,12 +48,12 @@ export async function callRpc<T>(name: string, args: Record<string, unknown>, di
       if (args.p_view === 'partner') throw new DomainError(403, 'FORBIDDEN', '当前无法查看对象账本。');
       return [] as T;
     }
-    if (name === 'sl_get_account_visible' || name === 'sl_get_transaction_visible') {
+    if (name === 'sl_get_account_visible' || name === 'sl_get_transaction_visible' || name==='sl_import_json') {
       throw new DomainError(404, 'RESOURCE_NOT_FOUND', '目标不存在。');
     }
     // Only the first write provisions a business identity, then retries once.
     await callRpcRaw('sl_provision_user', {
-      p_auth_subject: args.p_actor_subject, p_display_name: displayName || '星账用户',
+      p_auth_subject: subject, p_display_name: displayName || '星账用户',
     });
     return callRpcRaw<T>(name, args);
   }
@@ -99,6 +100,7 @@ function mapRpcError(error: unknown): Error {
   if (message.includes('sl_binding_invitation_invalid')) return new DomainError(422, 'BINDING_INVITATION_INVALID', '绑定凭据无效或已过期。');
   if (message.includes('sl_partner_unavailable')) return new DomainError(403, 'FORBIDDEN', '当前无法查看对象账本。');
   if (message.includes('sl_version_mismatch')) return new DomainError(412, 'RESOURCE_VERSION_CONFLICT', '内容已变化，请刷新后重做。');
+  if (message.includes('sl_resource_conflict')) return new DomainError(409, 'RESOURCE_VERSION_CONFLICT', '内容已变化，请刷新后重做。');
   if (message.includes('sl_opening_recalculation_conflict')) return new DomainError(409, 'OPENING_STATE_RECALCULATION_CONFLICT', '无法按这些初始份额和日期安全重建，请检查后重试。原记录未改动。');
   if (message.includes('sl_unsafe_reversal')) return new DomainError(409, 'FUNDS_ALLOCATION_NOT_POSSIBLE', '这笔账的资金已被使用，无法安全撤销。');
   if (message.includes('sl_invalid_input')) return new DomainError(422, 'VALIDATION_ERROR', '请求内容不合法。');

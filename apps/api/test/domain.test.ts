@@ -39,7 +39,7 @@ test('maintenance patches reject forged balances and invalid money', () => {
   assert.throws(() => parseAccountPatch({ balance_minor: 1 }));
   assert.deepEqual(parseManualTransactionPatch({ amount_minor: 1500, note: '' }), { amount_minor: 1500, note: '' });
   assert.throws(() => parseManualTransactionPatch({ amount_minor: 1.5 }));
-  assert.throws(() => parseManualTransactionPatch({ source_account_profile_id: 'forged' }));
+  assert.throws(() => parseManualTransactionPatch({ source_account_profile_id: 12 }));
 });
 
 test('fund adjustment distinguishes savings owners and rejects illegal shares', () => {

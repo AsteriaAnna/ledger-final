@@ -3,9 +3,10 @@ import { createWithKey, deleteTransaction, getAccounts, getTransactions, patchTr
   type Account, type Session, type Transaction, type TransactionMutation, type FundNotice, type ManualType } from '../../api/client';
 import { minor, minorInput, money, nowShanghai } from '../../lib/format';
 import { TransactionAccounts, transactionAccounts } from './TransactionAccounts';
+import { SourceProfileSelect } from '../imports/SourceProfileSelect';
 
 const categories: [string, string][] = [['food', '餐饮'], ['shopping', '购物'], ['transport', '交通'], ['education', '教育'], ['health', '医疗'], ['entertainment', '娱乐'], ['utilities', '生活缴费'], ['other', '其他']];
-const typeNames = { income: '收入', expense: '支出', transfer: '转账' };
+const typeNames = { income: '收入', expense: '支出', transfer: '转账',refund:'退款' };
 const noticeText = (notices: FundNotice[]) => notices.map(notice =>
   `已使用${notice.code === 'OWN_SAVINGS_USED' ? '本人' : '对象'}存款 ${money(notice.amount_minor)}。`).join('');
 
@@ -20,12 +21,14 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
   const [accountId, setAccountId] = useState('');
   const [type, setType] = useState<ManualType>('expense');
   const [toId, setToId] = useState('');
+  const [sourceProfile,setSourceProfile]=useState('');
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(nowShanghai);
   const [category, setCategory] = useState('other');
   const [merchant, setMerchant] = useState('');
   const [note, setNote] = useState('');
-  const [editing, setEditing] = useState<{ transaction: Transaction; type: ManualType; accountId: string; toId: string; amount: string;
+  const [editing, setEditing] = useState<{ transaction: Transaction; type: ManualType|'refund'; accountId: string; toId: string; amount: string;
+    sourceProfile:string; affectsSpending:boolean;
     date: string; category: string; merchant: string; note: string } | null>(null);
 
   useEffect(() => { if (!accountId && accounts[0]) setAccountId(accounts[0].id); }, [accountId, accounts]);
@@ -44,6 +47,7 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
     try {
       const result = await createWithKey<TransactionMutation>(session, '/transactions', {
         type, ...transactionAccounts(type, accountId, toId), amount_minor: minor(amount),
+        ...(sourceProfile?{source_account_profile_id:sourceProfile}:{}),
         occurred_at: `${date}:00+08:00`, category_code: category, merchant, note,
       });
       setAmount(''); setMerchant(''); setNote('');
@@ -59,8 +63,9 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
     setBusy(true); onMessage('');
     try {
       const result = await patchTransaction(session, editing.transaction, {
-        type: editing.type,
-        ...transactionAccounts(editing.type, editing.accountId, editing.toId), amount_minor: minor(editing.amount),
+        ...(editing.type==='refund'?{affects_spending:editing.affectsSpending}:{type:editing.type}),
+        source_account_profile_id:editing.sourceProfile||null,
+        ...transactionAccounts(editing.type==='refund'?'income':editing.type, editing.accountId, editing.toId), amount_minor: minor(editing.amount),
         occurred_at: `${editing.date}:00+08:00`, category_code: editing.category,
         merchant: editing.merchant, note: editing.note,
       });
@@ -94,6 +99,7 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
         <option value="expense">支出</option><option value="income">收入</option><option value="transfer">内部转账</option></select></label>
       <TransactionAccounts type={type} accounts={accounts} accountId={accountId} toId={toId}
         onAccount={id => { setAccountId(id); if (id === toId) setToId(''); }} onTo={setToId} />
+      <SourceProfileSelect session={session} value={sourceProfile} onChange={setSourceProfile}/>
       <div className="two"><label>金额（元）<input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} required /></label>
         <label>时间（北京时间）<input type="datetime-local" max={nowShanghai()} value={date} onChange={(event) => setDate(event.target.value)} required /></label></div>
       <label>分类<select value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
@@ -106,11 +112,14 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
         <p className="muted">{transaction.occurred_at.slice(0, 16).replace('T', ' ')} · {transaction.type === 'transfer' ?
           `${visibleAccounts.find(account => account.id === transaction.from_account_id)?.name} → ${visibleAccounts.find(account => account.id === transaction.to_account_id)?.name}` :
           visibleAccounts.find(account => account.id === transaction.account_id)?.name}{transaction.read_only ? ' · 只读' : ''}</p></div>
-      <div><strong>{transaction.type === 'income' ? '+' : transaction.type === 'expense' ? '−' : ''}{money(transaction.amount_minor)}</strong>
+      <div><strong>{transaction.type === 'income'||transaction.type==='refund' ? '+' : transaction.type === 'expense' ? '−' : ''}{money(transaction.amount_minor)}</strong>
+        {transaction.type==='refund'&&<p>{transaction.affects_spending?'抵减花销':'不抵减花销'} · {transaction.refund_kind==='merchant_refund'?'商户退款':'转账退回'}</p>}
+        {!!transaction.source_summaries?.length&&<details><summary>官方来源</summary>{transaction.source_summaries.map(s=><p key={s.source_record_id}>{s.platform==='wechat'?'微信':'支付宝'} · 原始时间 {s.source_occurred_at}</p>)}</details>}
         {!transaction.read_only && <div className="view-switch">
           <button className="secondary" disabled={busy} onClick={() => setEditing({ transaction, type: transaction.type,
             accountId: transaction.type === 'transfer' ? transaction.from_account_id : transaction.account_id,
             toId: transaction.type === 'transfer' ? transaction.to_account_id : '', amount: minorInput(transaction.amount_minor),
+            sourceProfile:transaction.source_account_profile_id??'',affectsSpending:transaction.type==='refund'?transaction.affects_spending:false,
             date: transaction.occurred_at.slice(0, 16), category: transaction.category_code,
             merchant: transaction.merchant, note: transaction.note })}>编辑</button>
           <button className="secondary" disabled={busy} onClick={() => remove(transaction)}>删除</button>
@@ -118,12 +127,14 @@ export function TransactionsPage({ session, accounts, transactions, bound, refre
     </article>)}</div>
     {view === 'mine' && editing && <section className="card form-card"><h2>编辑账单</h2>
       <form onSubmit={saveEdit}>
-        <label>编辑记账类型<select value={editing.type} onChange={event =>
+        {editing.type==='refund'?<p>官方退款 · 类型与来源子类型保持不变。</p>:<label>编辑记账类型<select value={editing.type} onChange={event =>
           setEditing({ ...editing, type: event.target.value as ManualType })}>
-          <option value="expense">支出</option><option value="income">收入</option><option value="transfer">内部转账</option></select></label>
-        <TransactionAccounts type={editing.type} accounts={accounts} accountId={editing.accountId} toId={editing.toId}
+          <option value="expense">支出</option><option value="income">收入</option><option value="transfer">内部转账</option></select></label>}
+        {editing.type==='refund'&&<label><input type="checkbox" checked={editing.affectsSpending} onChange={e=>setEditing({...editing,affectsSpending:e.target.checked})}/>抵减个人花销</label>}
+        <TransactionAccounts type={editing.type==='refund'?'income':editing.type} accounts={accounts} accountId={editing.accountId} toId={editing.toId}
           onAccount={id => setEditing({ ...editing, accountId: id, toId: id === editing.toId ? '' : editing.toId })}
           onTo={id => setEditing({ ...editing, toId: id })} />
+        <SourceProfileSelect session={session} value={editing.sourceProfile} onChange={id=>setEditing({...editing,sourceProfile:id})}/>
         <div className="two"><label>金额（元）<input required inputMode="decimal" value={editing.amount} onChange={(event) =>
           setEditing({ ...editing, amount: event.target.value })} /></label>
           <label>时间（北京时间）<input required type="datetime-local" max={nowShanghai()} value={editing.date}

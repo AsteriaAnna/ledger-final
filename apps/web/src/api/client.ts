@@ -29,8 +29,10 @@ export type ManualType = 'income' | 'expense' | 'transfer';
 export type Transaction = {
   id: string; amount_minor: number; occurred_at: string; category_code: string;
   merchant: string; note: string; version: number; read_only: boolean;
+  source_account_profile_id: string|null; source_summaries:{source_record_id:string;platform:string;source_occurred_at:string}[];
 } & ({ type: 'income' | 'expense'; account_id: string } |
-  { type: 'transfer'; from_account_id: string; to_account_id: string });
+  { type: 'transfer'; from_account_id: string; to_account_id: string } |
+  { type:'refund'; account_id:string; refund_kind:'merchant_refund'|'transfer_return'; affects_spending:boolean });
 export type Relationship = {
   status: 'unbound' | 'bound'; partner: { id: string; display_name: string } | null;
   permissions: { partner_accounts: 'none' | 'read_only'; partner_transactions: 'none' | 'read_only' };
@@ -54,14 +56,17 @@ export async function activeSession(): Promise<Session | null> {
   return data.session as Session;
 }
 
-async function request<T>(session: Session, path: string, init?: RequestInit): Promise<T> {
+export async function requestEnvelope<T>(session: Session, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}/api/v1${path}`, {
     ...init,
-    headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json', ...init?.headers },
+    headers: { Authorization: `Bearer ${session.access_token}`, ...(init?.body instanceof FormData ? {} : {'Content-Type': 'application/json'}), ...init?.headers },
   });
   const body = await response.json().catch(() => null);
   if (!response.ok) throw new ApiError(response.status, body?.code, body?.message ?? `请求失败（${response.status}）`);
-  return body.data as T;
+  return body as T;
+}
+export async function request<T>(session: Session,path:string,init?:RequestInit):Promise<T> {
+  return (await requestEnvelope<{data:T}>(session,path,init)).data;
 }
 
 export const getAccounts = async (session: Session, view: 'mine' | 'partner' = 'mine') =>
@@ -88,6 +93,7 @@ export const patchAccount = (session: Session, account: Account, patch: {
 
 export const patchTransaction = (session: Session, transaction: Transaction, patch: {
   type?: ManualType;
+  source_account_profile_id?:string|null; affects_spending?:boolean;
   account_id?: string; from_account_id?: string; to_account_id?: string; amount_minor?: number; occurred_at?: string;
   category_code?: string; merchant?: string; note?: string;
 }) => request<TransactionMutation>(session, `/transactions/${transaction.id}`, {
@@ -100,10 +106,16 @@ export const deleteTransaction = (session: Session, transaction: Transaction) =>
   });
 
 export async function createWithKey<T>(session: Session, path: string, payload: unknown, ifMatchVersion?: number): Promise<T> {
+  const fingerprint=ifMatchVersion===undefined?payload:{ifMatchVersion,payload};
+  return withRequestIntent(session,path,fingerprint,key=>request<T>(session,path,{
+    method:'POST',headers:{'Idempotency-Key':key,...(ifMatchVersion===undefined?{}:{'If-Match':`"${ifMatchVersion}"`})},body:JSON.stringify(payload),
+  }));
+}
+export async function withRequestIntent<T>(session:Session,path:string,payload:unknown,send:(key:string)=>Promise<T>):Promise<T> {
   const identity = session.user?.id ?? 'unknown';
   const intentId = `sl-intent:${identity}:${path}`;
   const serialized = JSON.stringify(payload);
-  const intentPayload = ifMatchVersion === undefined ? serialized : JSON.stringify({ ifMatchVersion, payload });
+  const intentPayload = serialized;
   const previous = sessionStorage.getItem(intentId);
   let intent: { key: string; payload: string } | null = null;
   try { intent = previous ? JSON.parse(previous) : null; } catch { /* Corrupt local intent is ignored. */ }
@@ -115,10 +127,7 @@ export async function createWithKey<T>(session: Session, path: string, payload: 
     sessionStorage.setItem(intentId, JSON.stringify(intent));
   }
   try {
-    const result = await request<T>(session, path, {
-      method: 'POST', headers: { 'Idempotency-Key': intent.key,
-        ...(ifMatchVersion === undefined ? {} : { 'If-Match': `"${ifMatchVersion}"` }) }, body: serialized,
-    });
+    const result = await send(intent.key);
     sessionStorage.removeItem(intentId);
     return result;
   } catch (error) {

@@ -5,6 +5,7 @@ import { registerAccountRoutes } from '../modules/accounts/routes.js';
 import { registerRelationshipRoutes } from '../modules/relationship/routes.js';
 import { registerTransactionRoutes } from '../modules/transactions/routes.js';
 import type { AuthRequest } from './request.js';
+import { registerImportRoutes } from '../modules/imports/routes.js';
 
 export const app = express();
 app.disable('x-powered-by');
@@ -36,9 +37,12 @@ app.use('/api/v1', async (req: AuthRequest, _res, next) => {
 registerRelationshipRoutes(app);
 registerAccountRoutes(app);
 registerTransactionRoutes(app);
+registerImportRoutes(app);
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (error instanceof DomainError) { res.status(error.status).json({ code: error.code, message: error.message }); return; }
+  if (error instanceof Error && error.name==='MulterError') { res.status(413).json({ code:'PAYLOAD_TOO_LARGE',message:'每次请选择一个不超过10MiB的文件。' });return; }
+  if (error instanceof Error && 'type' in error && error.type==='entity.too.large') { res.status(413).json({code:'PAYLOAD_TOO_LARGE',message:'请求内容过大。'});return; }
   if (error instanceof SyntaxError && 'body' in error) { res.status(400).json({ code: 'BAD_REQUEST', message: '请求正文不是有效 JSON。' }); return; }
   console.error('Unhandled API error', error instanceof Error ? error.message : String(error));
   res.status(500).json({ code: 'INTERNAL_ERROR', message: '暂时无法完成操作。' });
